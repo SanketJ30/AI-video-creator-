@@ -179,3 +179,49 @@ Two ways out, and it is a spec question rather than a code one:
 template must carry 1–3 cues, enforced as blocking. Scenes on the other five
 carry zero and are not flagged. On video v2 that means 4 of 9 scenes are exempt
 from a rule §9.2 states without exceptions.
+
+---
+
+## ISSUE-6 — §9.3's ≤3 text elements is unsatisfiable by two registered templates · OPEN
+
+**Tension between:** §9.3 — *"≤3 simultaneous text elements"* — and
+`templates.py`, where `table_build` and `terminal_replay` exist specifically to
+put a sequence of short text rows on screen.
+
+Measured across the registry with a minimal realistic fill of each template:
+
+| template | text elements | fires §9.3 |
+|---|---|---|
+| cold_open | 1 | no |
+| key_phrase | 1 | no |
+| title_card | 2 | no |
+| term_card | 2 | no |
+| labelled_diagram | 2 | no |
+| concept_illustration | 2 | no |
+| series_build | 3 | no |
+| **table_build** | **4** | **yes** |
+| **terminal_replay** | **5** | **yes** |
+
+Only those two, and they fire *by construction*: a 2×2 table is the smallest
+useful table and it is already 4 elements. Any real use of either template
+warns.
+
+**Why it is not counted differently.** A build's rows arrive one at a time but
+they do not leave — at the end of a `table_build` every cell is on screen
+together, which is what "simultaneous" measures. Counting filled *slots* instead
+(a table = one element) was implemented, measured, and reverted: it drops the
+maximum across all 11 templates to 2, so the rule can never fire on anything and
+is worthless.
+
+**So the count is right and the conflict is real.** It is a spec question:
+
+1. **§9.3's cap applies to independent text elements, not to the rows of one
+   structured element** — needs v0.2 to say so, and needs a number for rows.
+2. **The cap stands and the two templates are wrong** — they should cap their
+   own row counts, which makes `terminal_replay` nearly useless.
+3. **The cap stands and the warning is correct** — current behaviour: every
+   table and terminal scene carries a §9.3 warning a human dismisses.
+
+**Current behaviour, pending that decision:** option 3. Warning, never blocking.
+On video v2 this fires on the 4 `table_build` scenes noted in the week-4
+findings, so it compounds with the template-variety flag on the same scenes.
