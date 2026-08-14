@@ -225,3 +225,44 @@ is worthless.
 **Current behaviour, pending that decision:** option 3. Warning, never blocking.
 On video v2 this fires on the 4 `table_build` scenes noted in the week-4
 findings, so it compounds with the template-variety flag on the same scenes.
+
+---
+
+## ISSUE-7 — the `new_terms` registry is per-video, so video 2 re-teaches video 1's terms · BLOCKING
+
+**Predicted in week 3, confirmed in week 4 on real data.** `docs/week3-findings.md`
+said: *"nothing in the current design carries the term set across videos, so I
+expect the first disagreement there rather than here."* v2 is the first second
+video, and the prediction holds — though not in the shape expected.
+
+Measured from stored `pedagogy_meta` on `mvcc-write-skew`:
+
+```
+v1 new_terms: xmin, xmax, snapshot, repeatable read
+v2 new_terms: snapshot, write skew, serializable isolation, select for update
+                ^^^^^^^^ already taught in v1
+```
+
+**The agreement rate did not catch it.** Code-computed and model-claimed
+`new_terms` agree 9/9 on v1 and 9/9 on v2 — because `first_use_only` runs
+against a set seeded empty at the start of each video, so the code and the
+model make the *same* mistake. A 100% agreement rate on a wrong answer is worth
+more attention than a disagreement would be: it means the check is measuring
+consistency, not correctness.
+
+**Why it matters beyond tidiness.** §9.2's pre-training rule fires on ">=3 new
+technical terms", so a phantom "new" term inflates cognitive-load accounting.
+More importantly this is the same root cause as [ISSUE-1](#issue-1): there is no
+cross-video memory of what has been taught, which is Wedge A — *"video 6
+correctly assumes what video 2 taught"* — and the thing the whole product is
+supposed to be for.
+
+**Fix, when Stage 2c is revisited:** seed the running term set from the union of
+all previous videos' `new_terms` rather than from empty. That is a set union
+over rows already in the database — deterministic, no model call, no threshold
+to invent. It also supplies the second half of the recall-slot gate ISSUE-1
+describes, which needs exactly this registry to check "every term presented as
+already-known appears in a previous video's `new_terms`".
+
+**Not fixed in week 4** on the same reasoning as ISSUE-1: it is a Stage 2c
+defect and week 4 is Stage 2d. Logged, not chased.

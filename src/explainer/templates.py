@@ -110,6 +110,7 @@ class Param:
     # For list types: the most items the layout can hold legibly. §9.3 caps
     # simultaneous on-screen objects at 7, and 4 if any carry text.
     max_items: int | None = None
+    # PROVISIONAL(D2) — see docs/week4-decisions-needed.md.
     # Whether a viewer READS this value, as opposed to it describing what the
     # shot depicts. `cold_open.premise` and `concept_illustration.subject` are
     # briefs for the imagery — nothing is typeset from them — so counting them

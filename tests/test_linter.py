@@ -343,3 +343,30 @@ def test_every_finding_carries_measured_threshold_and_fix():
         assert f.measured, f"{f.rule} has no measurement"
         assert f.threshold, f"{f.rule} has no threshold"
         assert f.fix, f"{f.rule} has no fix"
+
+
+# ------------------------------------ no rule may be silently dead
+
+def test_every_spec_constant_is_either_enforced_or_named_as_not_enforced():
+    """MAX_WORDS_PER_LINE was defined, transcribed from §9.3, and never read by
+    anything — a rule that looks implemented and does nothing. That is the exact
+    failure MODEL_BASED_RULES and DEFERRED_RULES exist to prevent, so the
+    invariant is asserted rather than trusted."""
+    import inspect
+    source = inspect.getsource(L)
+    named = set(L.MODEL_BASED_RULES) | set(L.DEFERRED_RULES)
+    for const in ("ONSCREEN_TEXT_MAX_SHARE", "MAX_ONSCREEN_OBJECTS",
+                  "MAX_ONSCREEN_OBJECTS_WITH_TEXT", "MAX_ONSCREEN_WORDS",
+                  "MAX_WORDS_PER_LINE", "MAX_TEXT_ELEMENTS",
+                  "MAX_NEW_INTERACTING_ELEMENTS", "PRETRAINING_NEW_TERM_TRIGGER",
+                  "VIDEO_HARD_CAP_SECONDS", "SEGMENT_BOUNDARY_MAX_SECONDS",
+                  "STATIC_TITLE_MAX_SECONDS"):
+        uses = source.count(const)
+        assert uses > 1 or "words_per_line" in named, (
+            f"{const} is defined and never used, and no DEFERRED_RULES entry "
+            f"says why")
+
+
+def test_the_words_per_line_rule_is_declared_unenforced():
+    assert "words_per_line" in L.DEFERRED_RULES
+    assert str(L.MAX_WORDS_PER_LINE) == "6"

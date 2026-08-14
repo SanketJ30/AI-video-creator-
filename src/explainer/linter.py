@@ -59,7 +59,10 @@ ONSCREEN_TEXT_MAX_SHARE = 0.20
 MAX_ONSCREEN_OBJECTS = 7                 # "Simultaneous on-screen objects <=7"
 MAX_ONSCREEN_OBJECTS_WITH_TEXT = 4       # "<=4 if any carry text"
 MAX_ONSCREEN_WORDS = 30                  # "<=25-30 words visible at once"
-MAX_WORDS_PER_LINE = 6                   # "<=6 words per line for emphasis"
+# "<=6 words per line for emphasis". Transcribed but NOT enforced — see
+# DEFERRED_RULES["words_per_line"]. Kept here so the number stays next to its
+# siblings rather than being reconstructed from the spec when layout arrives.
+MAX_WORDS_PER_LINE = 6
 MAX_TEXT_ELEMENTS = 3                    # "<=3 simultaneous text elements"
 MAX_NEW_INTERACTING_ELEMENTS = 4         # "New interacting elements per scene <=4"
 
@@ -124,6 +127,13 @@ DEFERRED_RULES = {
     "spatial_contiguity":
         "§9.2: a label sits within <=5% of frame width of its referent. Needs "
         "layout geometry, which exists only after render.",
+    "words_per_line":
+        "§9.3: '<=6 words per line for emphasis' (MAX_WORDS_PER_LINE). A slot "
+        "string does not know where it wraps, and no template declares which "
+        "of its slots render as a single line, so there is no line to count "
+        "words on until layout exists. The number is transcribed; the rule is "
+        "not enforced, and this entry is why that is visible rather than a "
+        "constant nobody reads.",
     "contrast_ratio":
         "§16.2 / §9.6: WCAG ratio per text layer against its resolved "
         "background. Needs the resolved theme — accessibility linter, step 5.",
@@ -258,6 +268,9 @@ def on_screen_word_count(slots: dict, template_name: str = "") -> int:
 
 def text_element_count(slots: dict, template_name: str = "") -> int:
     """§9.3's "simultaneous text elements" — one per readable string.
+
+    PROVISIONAL(D1) — see docs/week4-decisions-needed.md. Strings vs slots is a
+    spec question (ISSUE-6), not a settled reading.
 
     A build template's rows arrive one at a time but they do not leave: at the
     end of a `table_build` all its cells are on screen together, which is what
