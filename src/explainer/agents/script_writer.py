@@ -51,11 +51,14 @@ from . import objective_extractor as ox
 AGENT = "script_writer"
 PROMPT = "script_writer"
 MAX_REPAIRS = 2
-# Adaptive thinking counts against this, and nine slots of narration plus a
-# long deliberation pass overran 16000 on the first v2-prompt run — the
-# escalation was correct and the ceiling was wrong. Raised with headroom
-# rather than by trimming the prompt, since the prompt is the contract.
-MAX_TOKENS = 32000
+# Adaptive thinking counts against this. 16000 overran on the first v2-prompt
+# run and 32000 overran again once the prompt grew a recall section, both
+# times as a correct escalation rather than a silent truncation. Raised to
+# 64000 — half of Sonnet 5's 128k output ceiling — so the next prompt section
+# does not trip it again. The request streams, so the SDK's non-streaming
+# guard does not apply. If this needs raising a third time, the thing to
+# examine is the effort setting, not the ceiling.
+MAX_TOKENS = 64000
 
 TIMING_SENSITIVITIES = ("rigid", "elastic")
 INTERACTIVITIES = ("low", "medium", "high")

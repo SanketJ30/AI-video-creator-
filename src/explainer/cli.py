@@ -729,13 +729,23 @@ def _course_position(conn, course_id: str, video: dict) -> dict:
     total = len(rows)
     ordinal = video["ordinal"]
     nxt = next((r for r in rows if r["ordinal"] == ordinal + 1), None)
+    prev = next((r for r in rows if r["ordinal"] == ordinal - 1), None)
     brief_row = db.one(conn, """select brief from course_briefs
                                 where course_id = %s order by version desc limit 1""",
                        (course_id,))
+    # §9.1 slot 3: recall "links to a prior objective BY ID (course memory)".
+    # Without the previous video's objectives in the payload the recall slot has
+    # nothing to link TO, and the course-memory mechanism cannot be exercised.
+    graph = coursegraph.load(conn, course_id)
+    lf = graph.learner_facing
     return {
         "ordinal": ordinal, "total": total,
         "next": ({"title": nxt["title"], "objective_refs": nxt["objective_refs"]}
                  if nxt else None),
+        "previous": ({"ref": prev["ref"], "title": prev["title"],
+                      "objectives": [{"ref": r, "statement": lf.get(r, "")}
+                                     for r in prev["objective_refs"]]}
+                     if prev else None),
         "out_of_scope": (brief_row or {}).get("brief", {}).get("out_of_scope", ""),
     }
 

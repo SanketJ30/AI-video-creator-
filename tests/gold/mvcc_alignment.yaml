@@ -681,4 +681,19 @@ runs:
         Stated rather than smoothed: the granularity explanation accounts for
         the anomaly result completely and predicts the Bloom result only in
         hindsight. Whether a 3-video budget recovers both is untested.
+      scope_limitation_of_the_gold: >-
+        Resolved by Sanket 15 Aug, recorded here rather than by amending the
+        gold a fourth time: the gold was AUTHORED FOR A ONE-VIDEO COURSE, so
+        comparing a two-video extraction against its Bloom levels mismatches by
+        construction. The analyze-level check falling to 1 of 3 is therefore not
+        a regression in the extractor; it is the gold's scope showing.
+        The check itself was also a bad proxy. "Graph Bloom peak" is something
+        the agent put pressure on; what actually matters is whether each
+        assessment item aligns at ITS OWN objective's level, which
+        objectives.check_alignment already enforces per objective and which
+        passed on every sample. The trade is recorded and left there:
+          max_videos 1 -> analyze 2/3, taxonomy 0/3
+          max_videos 2 -> analyze 1/3, taxonomy 3/3
+        A 3-video budget was NOT tested. Deliberately: chasing the proxy would
+        cost another $0.60 to move a number that does not measure the thing.
 

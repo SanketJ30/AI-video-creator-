@@ -53,6 +53,19 @@ slot speaks that string **verbatim**. Do not rephrase it, expand it, prepend "by
 the end of this scene", or wrap it in a sentence. It was written to fit the slot
 and it is reused as the scene's title, so any change breaks both.
 
+## The recall slot and course memory
+
+`course_position.previous` gives you the video before this one and the objectives
+it taught, each with its ref. When it is present, the `recall` slot must activate
+one of THOSE objectives by name — that is the link this course is built to make,
+and a recall slot that instead restates something generic wastes the only place
+the course remembers itself.
+
+Name what the learner can already do, in the words the earlier video used, then
+say what it is about to be used for. When `previous` is null there is no earlier
+video, and the recall slot falls back to the assumed prior knowledge in the
+brief.
+
 ## The end of the course
 
 `course_position` tells you where this video sits. When `is_final_video` is true,
