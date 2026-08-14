@@ -1,120 +1,96 @@
-# Script snapshot — mvcc-write-skew / v2
+# Script snapshot — mvcc-write-skew / v2 (run 3)
 
-    run id          v3-run5 configuration, sample taken 15 Aug 2026
+    run id          week5 step 0, sample taken 15 Aug 2026
     brief version   v5
-    objective graph 7 objectives (4 taught)
-    extractor       objective_extractor@v3+b5687d51
-    planner         curriculum_planner@v1+ad8ed399
-    script writer   script_writer@v2+c0a77029
-    models          claude-opus-5 (extraction) / claude-sonnet-5 (plan, script)
-    body sha256     47833a387aad
+    objective graph 7 objectives (4 taught) — v3-run5
+    script writer   script_writer@v3   (recall gate: termregistry)
+    supersedes      run 2 (script_writer@v2), kept in git history
+    body sha256     413bb6f4ff8e
 
-Raw, unedited output of `explainer script show mvcc-write-skew v2`. This file
-exists because the terminal paste keeps scrolling out of reach, and week 4's
-§9.4 on-screen-text rules are specified against THIS narration.
+Regenerated for week 5 step 0: the recall slot now links to v1's objectives by
+ref and `new_terms` is computed against a per-course registry, so v2 no longer
+re-declares anything v1 taught.
 
-The header carries the run id and brief version deliberately: an earlier copy of
-this file went stale silently when the graph was regenerated beneath it. If the
-brief version here does not match `explainer course brief mvcc-write-skew`, this
-snapshot is out of date and any §9.4 number computed from it is not attributable.
-
-SCOPE: this is video 2 of 2, and it is the one Milestone A builds. v1 ("How
-Postgres picks which row version you see", objectives o4 and o5) stays in the
-graph unbuilt as v2's prerequisite. v2 was chosen over v1 deliberately: the topic
-exists for write skew and the ANSI-vs-PostgreSQL trap, and building the
-prerequisite video would mean week 6's review judges the easy half while the trap
-never reaches the screen. Building v2 also makes §9.1 slot 3 testable — the
-recall slot has a real prior video to link back to, which is the course-memory
-mechanism behind Wedge A.
-
-Week 4's §9.4 numbers are measured against THIS narration: v3-run5 configuration,
-brief v5, video v2.
-
-FINDING VISIBLE IN THE RECALL SLOT BELOW: the course-memory link is not being
-made. `_course_position` passes v1's two objectives with their learner-facing
-statements, and prompts/script_writer.v2.md instructs the recall slot to activate
-one of them by name. The model instead recalled what Repeatable Read blocks —
-which is this video's own content, not the previous video's. Wiring correct,
-prompt correct, behaviour wrong. Not fixed here; fixing it is a prompt version
-and belongs with the rest of the Stage 2c work.
-
-`duration=null` on every scene is CHALLENGES R5 holding: duration is derived from
-TTS, which is week 5. The `sp_` ids are the span ids cues anchor to (R3/R4).
+NOTE ON ISSUE-8: this run does not contain the false claim at the old
+`sp_b735cd9656`. That is sample variance, not a fix — nothing detected it. See
+ISSUE-8 in known-issues.md.
 
 ```
 v2  [procedure_demo]  Spotting write skew and fixing it
 budget 240s  objectives o6, o7
 
- 1. s01  hook       target 15s  duration=null  elastic  obj=o6  load=low
-      sp_378f4b4314  Two doctors are on call tonight.
-      sp_f4cf308783  Each checks the schedule, sees a colleague listed too, and taps 'off duty.' Postgres commits both requests without a single error.
-      sp_70d8e1e9ce  But when the board refreshes, nobody's covering the shift tonight.
-      sp_5cff6d5311  What happened?
+ 1. s01  hook       target 15s  duration=null  elastic  obj=o6  load=medium
+      sp_779baeb479  Two on-call doctors each check the schedule, see someone else covering, and clock off at the same moment.
+      sp_b43d774254  Postgres commits both updates cleanly — no error, no warning.
+      sp_d6d5c540b8  So why is nobody on call?
 
  2. s02  objective  target 10s  duration=null  elastic  obj=o6  load=low
-      sp_40ffa17000  You'll spot write skew in a transaction pair that Postgres lets commit without complaint.
+      sp_c66a90b2ad  You'll spot write skew in a transaction pair that Postgres lets commit without complaint.
 
- 3. s03  recall     target 20s  duration=null  elastic  obj=o6  load=medium
-      sp_836dafb0b5  You already know how Postgres's Repeatable Read isolation behaves: it blocks a non-repeatable read, blocks a phantom, and blocks two transactions from losing an update when they write the same row
-      sp_6d94d3c56a  each one stopped with a could-not-serialize error.
-      sp_bab37b1c8f  Today's transactions won't trigger any of that.
-      sp_5837ce3d92  They'll pass every check Repeatable Read runs, and still get it wrong.
-      [WARNING] readability_fk: Flesch-Kincaid grade 11.07 exceeds the technical limit of 11.0.
-      [WARNING] speaking_rate: 57 words need 21.4s at 160 wpm but the recall slot budgets 20s (8% over; 53 words fit).
+ 3. s03  recall     target 20s  duration=null  elastic  obj=o6  load=low
+      sp_e8129aae7a  You already learned to explain how xmin and xmax decide which row versions a Repeatable Read snapshot can see.
+      sp_87fbfcf003  That rule is what keeps a transaction's own reads consistent, row by row, from start to finish.
+      sp_826d91c40c  Now watch two transactions, each one perfectly consistent by that same rule, that together still break a rule neither one touched alone.
+      [WARNING] speaking_rate: 58 words need 21.8s at 160 wpm but the recall slot budgets 20s (9% over; 53 words fit).
 
  4. s04  present    target 90s  duration=null  rigid  obj=o6  load=high
-      new terms: snapshot, write skew
-      sp_3dc90ed249  Here's the mechanism.
-      sp_c6249782cc  Both doctors start their transactions at the same instant, so Postgres hands each one a snapshot
-      sp_ade42574d7  a frozen view of the on-call table as it looked the moment the transaction began.
-      sp_acde26c2a5  In that snapshot, two doctors show as on call.
-      sp_88c9f341ee  Doctor A runs a check: 'is anyone else on call besides me?' The snapshot says yes, so A updates A's own row to off duty.
-      sp_b51bf5d0cd  At the same moment, Doctor B runs the identical check against B's own snapshot, sees the same two doctors, and updates B's own row too.
-      sp_b735cd9656  Neither transaction writes the row the other one reads.
-      sp_4f06ffeab0  A only writes A's row; B only writes B's row.
-      sp_1c3727ba32  Repeatable Read watches for two transactions writing the same row
-      sp_8a2f1d1015  that collision is what triggers a could-not-serialize error.
-      sp_c0aefbdd27  Here there's no collision, so Postgres has nothing to catch.
-      sp_0a69c74ccc  Both commit cleanly, and the table now shows zero doctors on call.
-      sp_4f71576f79  The rule that broke
-      sp_4ad90a3a7d  at least one doctor must stay on call
-      sp_a28aff68ec  was never a fact about one row.
-      sp_6075dc41f2  It's a fact about the relationship between rows, and each transaction only ever read that relationship, never locked it.
-      sp_52f3f3ceb8  That gap, reading a condition and writing based on it while the condition itself goes unprotected, is write skew.
+      new terms: write skew, could-not-serialize error
+      sp_4fb3dafdf2  Picture two on-call doctors, Alex and Bo.
+      sp_d1ee104181  The rule: at least one of them must always be reachable.
+      sp_8c21188f75  Alex's transaction checks how many doctors are currently on call, sees two, and decides it's safe to go off duty herself.
+      sp_6005e89512  At almost the same moment, Bo's transaction runs the identical check, also sees two, and decides it's safe for him to go off duty too.
+      sp_d65ca15911  Both transactions took their snapshot before either write landed, so each one saw the old count of two.
+      sp_637d7eca51  Repeatable Read keeps that snapshot consistent for the whole transaction
+      sp_8286d8998e  but it makes no promise about a rule that spans two separate rows.
+      sp_9f9f419a6b  Alex updates only her own row.
+      sp_4ca5431376  Bo updates only his.
+      sp_f465724901  Postgres never sees them touch the same row, so it has nothing to flag as a conflict.
+      sp_03937d257c  Both commit cleanly.
+      sp_4b7c31d8bd  Neither gets a could-not-serialize error — the error Postgres raises when it catches a conflict it can't resolve.
+      sp_431e8c3403  Now nobody is on call.
+      sp_c9de83fc9c  That's write skew: two transactions each read a shared condition, each act correctly given what they saw, and together they break a rule that neither one violated alone.
+      sp_16c1f6e003  Compare that to a non-repeatable read or a phantom: Repeatable Read's snapshot rules those out directly.
+      sp_70d544d18d  Compare it to a lost update on that row: Postgres catches the row-level conflict and blocks one transaction with a could-not-serialize error.
+      sp_a9c2acdb5a  Write skew gets through because the conflict lives across rows, in the rule connecting them, not in any single row Postgres watches.
+      [WARNING] speaking_rate: 245 words need 91.9s at 160 wpm but the present slot budgets 90s (2% over; 240 words fit).
 
- 5. s05  guide      target 52s  duration=null  elastic  obj=o7  load=high
+ 5. s05  guide      target 52s  duration=null  elastic  obj=o7  load=medium
       new terms: serializable isolation, select for update
-      sp_e2fb27decd  Take the options one at a time, using the doctors.
-      sp_6569746940  A table lock works: lock the whole table before either transaction reads it, and the second one waits.
-      sp_45c77acb4b  That kills the anomaly, but it also blocks every doctor updating any unrelated row
-      sp_98cdf3d3bf  you've traded a bug for a bottleneck.
-      sp_e5241cf44d  SELECT FOR UPDATE looks better: lock the rows you read.
-      sp_fb5e4ab259  But neither doctor's query updates the row it reads
-      sp_d3de4b56b2  each reads the whole list and writes only its own row.
-      sp_b66b284d03  Locking a read that never touches the write target is easy to get wrong.
-      sp_46ad1d4dd0  A constraint could work if the rule lived in one row, but 'at least one doctor on call' is a fact about the whole table, and a plain CHECK can't see across rows.
-      sp_45347d358b  That leaves SERIALIZABLE: it does the work of noticing the conflict for you, without you having to track which rows matter.
-      [WARNING] speaking_rate: 147 words need 55.1s at 160 wpm but the guide slot budgets 52s (7% over; 138 words fit).
+      sp_65fead3d5b  Back to Alex and Bo, with four options on the table: turn on SERIALIZABLE isolation, run SELECT ...
+      sp_79a14acee2  FOR UPDATE on the rows they read, take a table-level lock, or add a constraint.
+      sp_adef07e47e  A constraint checks one row at a time, so it can't see a rule like 'at least one doctor on call'
+      sp_7780b0c63b  that rule spans two rows.
+      sp_dbcce2e77a  A table lock fixes it too, but now every transaction touching that table queues behind every other one, even ones that never conflict.
+      sp_f1331aff61  SELECT ...
+      sp_b6d901c2ef  FOR UPDATE on the two on-call rows works directly: Alex locks both before deciding, so Bo waits, sees her result, and doesn't also go off call.
+      sp_0254986056  Its cost is you have to know which rows to lock ahead of time.
+      sp_2af9c66155  SERIALIZABLE is the general answer: Postgres tracks the dependency between the two transactions and stops one at commit with a could-not-serialize error.
+      sp_45ccefa320  Its cost: your application has to retry that transaction from the start.
+      [WARNING] speaking_rate: 156 words need 58.5s at 160 wpm but the guide slot budgets 52s (13% over; 138 words fit).
 
  6. s06  elicit     target 17s  duration=null  elastic  obj=o7  load=medium
-      sp_b50d301a19  Look at the doctors one more time.
-      sp_a930117a98  If you could make only one change to stop this for good, which would it be: turn on SERIALIZABLE, add SELECT FOR UPDATE to the read, lock the whole table, or write a constraint?
-      sp_67b27540b1  Pick one, and be ready to say what it costs you.
-      [WARNING] speaking_rate: 52 words need 19.5s at 160 wpm but the elicit slot budgets 17s (16% over; 45 words fit).
+      sp_dacf3b5d61  Now picture a shared account with a $500 overdraft limit, checked and debited by two concurrent withdrawals, each pulling from a different sub-account.
+      sp_d6a3bd2aa5  Which of the four remedies would you reach for here, and what would it cost you?
+      sp_e92b36706a  Decide before you keep watching.
 
  7. s07  feedback   target 19s  duration=null  elastic  obj=o7  load=medium
-      sp_bc85099a61  SERIALIZABLE is the fix.
-      sp_93758ba6db  Postgres tracks what each transaction reads, not just writes, and aborts one with a serialization error when the two could only make sense running one after another.
-      sp_3274235d57  The cost: your app must retry that transaction.
-      sp_5941201954  A table lock also stops it, but it blocks every doctor's update, not just the two in conflict.
-      [WARNING] speaking_rate: 57 words need 21.4s at 160 wpm but the feedback slot budgets 19s (14% over; 50 words fit).
+      sp_ec6a9c8fca  SELECT ...
+      sp_c5049f410a  FOR UPDATE on that balance row is the cheap fix here
+      sp_4aa054b057  you know exactly which row backs the limit.
+      sp_9c5acedebc  A table lock also works, but it stalls every other transaction on the table, not just these two.
+      sp_96473a52e5  Reach for SERIALIZABLE only when you can't pin the rows down in advance, and then you retry on that could-not-serialize error.
+      [WARNING] speaking_rate: 59 words need 22.1s at 160 wpm but the feedback slot budgets 19s (18% over; 50 words fit).
 
  8. s08  assess     target 10s  duration=null  elastic  obj=o7  load=medium
-      sp_b9eca96a44  New case: two withdrawals check a shared balance rule, then hit different accounts.
-      sp_c6ed8a4b5f  Which fix do you recommend, and what's the cost of choosing it?
+      sp_0b934e23b8  Two transactions each check total warehouse stock, then each ship the last unit from a different bin.
+      sp_64489a6b66  Which remedy do you recommend, and what's the cost?
+      sp_b900135162  Work it out now.
+      [WARNING] speaking_rate: 30 words need 11.2s at 160 wpm but the assess slot budgets 10s (15% over; 26 words fit).
 
  9. s09  retain     target 6s  duration=null  elastic  obj=o7  load=low
-      sp_8f3f52a97d  Before you move on, say aloud how you'd spot write skew and pick its fix.
+      sp_b44913f049  Sum up in your own words: why does write skew slip past Repeatable Read, and which fix would you defend?
+      [WARNING] speaking_rate: 20 words need 6.5s at 185 wpm but the retain slot budgets 6s (11% over; 18 words fit).
 
-9 scenes, 46 spans, 5 findings
+9 scenes, 46 spans, 6 findings
+
 ```

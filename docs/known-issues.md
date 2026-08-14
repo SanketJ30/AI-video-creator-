@@ -360,6 +360,24 @@ only the second is what §7.2's Fact Checker is for. **It is load-bearing.**
 must catch it. Editing the narration would remove the only real specimen we have
 of the defect class the Fact Checker exists to find.
 
+### Update, week 5 step 0 — the claim did not recur, and that changes nothing
+
+v2 was regenerated under `script_writer.v3` for the recall gate (a different
+change entirely). The new s04 does **not** contain the false claim; it says
+*"Postgres never sees them touch the same row"* (true — they do not *write* the
+same row) and *"the conflict lives across rows, in the rule connecting them"*
+(true).
+
+**This is not a fix and must not be recorded as one.** Nothing detected the
+error; a re-roll of a stochastic stage simply landed differently. The gap is
+exactly as open as it was — the next generation can reintroduce it, on this
+video or any other, and no gate would notice. The original spans are preserved
+above because they are the specimen.
+
+If anything this strengthens the case for the Fact Checker: a defect that
+appears and disappears across samples of the same prompt is one that manual
+review will catch only when it happens to look.
+
 ---
 
 ## ISSUE-9 — speaking-rate overruns are systematic, and the video will run over · MEASURED

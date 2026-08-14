@@ -16,7 +16,8 @@ import sys
 import typer
 
 from . import brief as brief_mod
-from . import coursegraph, db, gagne, goldgraph, linter, prose, orchestrator, worker
+from . import (coursegraph, db, gagne, goldgraph, linter, prose,
+               orchestrator, termregistry, worker)
 from . import manifest as manifest_mod
 from .agents import objective_extractor
 from .config import settings
@@ -670,10 +671,13 @@ def script_generate(slug: str, video_ref: str,
         b = brief_mod.load(conn, course_id)
         graph = coursegraph.load(conn, course_id)
         plan_rows = _course_position(conn, course_id, video)
+        # ISSUE-7/ISSUE-1: what earlier videos in this course already taught.
+        # Without it new_terms is computed against an empty set every video.
+        registry = termregistry.build(conn, course_id, video["ordinal"])
         try:
             draft = sw.generate(conn, course_id, b, video, graph.objectives,
                                 learner_facing=graph.learner_facing,
-                                position=plan_rows)
+                                position=plan_rows, registry=registry)
         except Escalated as e:
             typer.echo(typer.style(e.render(), fg=typer.colors.MAGENTA), err=True)
             raise typer.Exit(2) from None

@@ -78,10 +78,24 @@ OUTPUT_SCHEMA: dict = {
                     "element_interactivity": {"type": "string",
                                               "enum": list(INTERACTIVITIES)},
                     "new_terms": {"type": "array", "items": {"type": "string"}},
+                    # ISSUE-1: the recall slot must declare what it presents as
+                    # already known, so a set-membership gate can check it
+                    # against what earlier videos actually taught. Empty for
+                    # every other slot.
+                    "assumed_known_terms": {"type": "array",
+                                            "items": {"type": "string"}},
+                    # Which PREVIOUS-video objective the recall slot activates.
+                    # NOT the same thing as `objective_ref`, which is assigned
+                    # in code and must be one of THIS video's objectives — the
+                    # scene has to serve a local objective AND link to a prior
+                    # one, and conflating the two makes the gate unsatisfiable.
+                    "recalls_objective_ref": {"type": "string"},
                     "rationale": {"type": "string"},
                 },
                 "required": ["slot", "narration", "timing_sensitivity",
-                             "element_interactivity", "new_terms", "rationale"],
+                             "element_interactivity", "new_terms",
+                             "assumed_known_terms", "recalls_objective_ref",
+                             "rationale"],
                 "additionalProperties": False,
             },
         },
@@ -185,6 +199,35 @@ def first_use_only(claimed: list[str], already_seen: set[str]) -> list[str]:
 
 # ----------------------------------------------------------------- parse
 
+def check_recall(filled: list[dict], carried: list[Objective],
+                 registry) -> list[str]:
+    """ISSUE-1's gate, run inside the repair loop so the model can fix it.
+
+    Set membership, twice. `registry` is a `termregistry.Registry`; None skips
+    the gate entirely, which is what happens when a caller has no course
+    context and is preferable to checking against an empty set and failing
+    everything.
+    """
+    if registry is None:
+        return []
+    from ..termregistry import check_recall_slot
+    problems: list[str] = []
+    for i, f in enumerate(filled, start=1):
+        if f["slot"] != Slot.RECALL.value:
+            if f.get("assumed_known_terms") or f.get("recalls_objective_ref"):
+                problems.append(
+                    f"scene {i} ({f['slot']}): assumed_known_terms and "
+                    f"recalls_objective_ref must be empty on every slot except "
+                    f"recall — only the recall slot presents things as already "
+                    f"known")
+            continue
+        problems += check_recall_slot(
+            f"scene {i} (recall)", f.get("recalls_objective_ref") or None,
+            [normalise_term(t) for t in f.get("assumed_known_terms") or []],
+            registry)
+    return problems
+
+
 def parse(raw: str, form: list[gagne.SlotSpec]) -> list[dict]:
     """Model text → one dict per slot, validated against the form.
 
@@ -240,6 +283,10 @@ def parse(raw: str, form: list[gagne.SlotSpec]) -> list[dict]:
             continue
         seen[slot] = {"slot": slot, "narration": narration, "timing_sensitivity": ts,
                       "element_interactivity": ei, "new_terms": terms,
+                      "assumed_known_terms": [
+                          str(t) for t in (s.get("assumed_known_terms") or [])],
+                      "recalls_objective_ref":
+                          str(s.get("recalls_objective_ref") or "").strip(),
                       "rationale": str(s.get("rationale") or "").strip()}
 
     unfilled = [w for w in wanted if w not in seen]
@@ -259,13 +306,19 @@ def generate(conn, course_id: str | None, brief: CourseBrief, video: dict,
              objectives: list[Objective], *, client=None,
              model: str | None = None,
              learner_facing: dict[str, str] | None = None,
-             position: dict | None = None) -> ScriptDraft:
+             position: dict | None = None,
+             registry=None) -> ScriptDraft:
     """Fill one video's slot form. `video` is a row from curriculum_planner.load.
 
     `position` carries the video's place in the course — ordinal, total, and
     the next video's objectives if there is one. Without it the retain slot
     has no way to know whether a forward reference is true, and week 3 shipped
     a final video promising a sequel that does not exist.
+
+    `registry` is a `termregistry.Registry` of what EARLIER videos in this
+    course already taught. Without it `new_terms` is computed against an empty
+    set every video and video 2 re-introduces video 1's vocabulary (ISSUE-7).
+    Passing None keeps the old behaviour and is correct only for video 1.
     """
     ref = prompts.load(PROMPT)
     parts = ox._sections(ref.body)
@@ -309,6 +362,9 @@ def generate(conn, course_id: str | None, brief: CourseBrief, video: dict,
         # re-abridge here.
         "learner_facing_statements": {
             o.ref: learner_facing.get(o.ref, "") for o in carried},
+        # ISSUE-1/7: the exact set the recall gate tests against. The model is
+        # given it so a repair is possible without guessing.
+        "already_taught": (sorted(registry.terms) if registry is not None else []),
         "course_position": {
             "video_number": position.get("ordinal"),
             "total_videos": position.get("total"),
@@ -354,6 +410,13 @@ def generate(conn, course_id: str | None, brief: CourseBrief, video: dict,
 
         try:
             filled = parse(raw, form)
+            # ISSUE-1: the recall gate runs INSIDE the loop, so a violation is
+            # repaired by the model rather than escalated to a human. It is a
+            # schema-class failure in the sense that matters: the output is
+            # structurally fine and semantically inadmissible.
+            recall_problems = check_recall(filled, carried, registry)
+            if recall_problems:
+                raise ox.SchemaError(recall_problems)
         except ox.SchemaError as e:
             attempts[-1].error = str(e)
             if n > MAX_REPAIRS:
@@ -376,7 +439,7 @@ def generate(conn, course_id: str | None, brief: CourseBrief, video: dict,
             continue
 
         return _assemble(filled, form, carried, ref.version, model_id, attempts,
-                         learner_facing)
+                         learner_facing, registry)
 
     raise AssertionError("unreachable")
 
@@ -397,11 +460,15 @@ def _objective_for_slot(slot: Slot, carried: list[Objective]) -> Objective:
 
 def _assemble(filled: list[dict], form: list[gagne.SlotSpec],
               carried: list[Objective], prompt_version: str, model_id: str,
-              attempts: list, learner_facing: dict[str, str] | None = None
-              ) -> ScriptDraft:
+              attempts: list, learner_facing: dict[str, str] | None = None,
+              registry=None) -> ScriptDraft:
     by_slot = {s.slot.value: s for s in form}
     learner_facing = learner_facing or {}
-    seen_terms: set[str] = set()
+    # ISSUE-7: seeded from what EARLIER videos taught, not from empty. A term
+    # video 1 introduced is not new in video 2, however confidently the model
+    # says it is — and it said so confidently enough that the code-vs-model
+    # agreement rate read 9/9 while both were wrong.
+    seen_terms: set[str] = registry.seen if registry is not None else set()
     scenes: list[DraftScene] = []
 
     for i, f in enumerate(filled, start=1):
