@@ -1,5 +1,10 @@
 # Hand-authored gold standard for objective extraction (Milestone A).
-# Authored by Sanket, 14 Aug 2026. NOT generated. Do not let an agent edit this.
+# Authored by Sanket, 14 Aug 2026. NOT generated. Do not let an agent edit this
+# except on my explicit instruction — the amendments below were made that way.
+#
+# AMENDMENT HISTORY. Kept in full rather than tidied: this file is the standard
+# other work is measured against, so how it changed matters more than how it
+# reads.
 #
 # v2 (14 Aug): assessment items added; o4 wording corrected from "detects a
 # rw-dependency cycle" to the dangerous-structure formulation — PostgreSQL SSI
@@ -7,8 +12,37 @@
 # which is necessary but not sufficient for a true cycle, which is why SSI
 # produces false-positive serialization failures. Confirmed independently by the
 # extractor's own o9/a7 output, which reached the pivot framing unprompted.
-topic: MVCC and the write skew anomaly under Repeatable Read isolation
-engine: postgresql            # o2/o3/o4 are engine-specific — see notes below
+#
+# v3 (14 Aug): o2 and o3 MERGED into a single analyze-level objective, and the
+# topic: line widened.
+#
+#   Why: three consecutive extraction runs folded "which anomalies RR prevents"
+#   and "predict write skew" into one objective, and on review the extraction was
+#   right and this file was wrong. Under a one-video budget, the contrast between
+#   what Repeatable Read prevents and what it does not is ONE act of analysis,
+#   not two sequential lessons. The old o2/o3 split was thinking in lessons
+#   rather than in objectives.
+#
+#   Also: the old topic: line was "MVCC and the write skew anomaly under
+#   Repeatable Read isolation", which does not imply the anomaly taxonomy at all.
+#   Any Course Brief derived from that line could never produce old-o2, and for
+#   three runs the extractor was blamed for a gap the topic line created. Widened
+#   so it implies the graph it is supposed to describe.
+#
+#   The merged objective KEEPS the criterion demanding all three anomaly names
+#   plus the invariant-violation prediction. That criterion is the only reason
+#   the ANSI-vs-PostgreSQL trap in note 2 ever got tested.
+#
+#   Consequence flagged for review: a1 was understand-level and would now fail
+#   constructive alignment against an analyze-level objective, so it has been
+#   replaced with an analyze-level item. THAT REPLACEMENT IS NOT REVIEWED — see
+#   the note on a1 below.
+
+topic: >-
+  MVCC and the write skew anomaly under Repeatable Read isolation in PostgreSQL —
+  how snapshots decide what a transaction reads, which concurrency anomalies
+  Repeatable Read prevents and which it does not, and how SSI closes the gap
+engine: postgresql            # o2/o4 are engine-specific — see notes below
 
 audience:
   level: intermediate
@@ -18,7 +52,7 @@ audience:
     - transaction ids (xid)
   native_language_ratio: 0.0
 
-# Milestone A is ONE video. o1 is assumed, o2+o3 are the video, o4 is video 2.
+# Milestone A is ONE video. o1 is assumed, o2 is the video, o4 is video 2.
 max_videos: 1
 target_seconds_per_video: 300
 
@@ -31,23 +65,16 @@ objectives:
     assumed: true              # taught elsewhere; this video refreshes it only
     prerequisites: []
 
+  # MERGED from the former o2 (describe which anomalies RR prevents) and o3
+  # (predict write skew) — see the v3 amendment note above. One act of analysis.
   - ref: o2
-    verb: describe
-    object: which anomalies PostgreSQL Repeatable Read prevents, and how
-    condition: ""
-    criterion: naming dirty read, non-repeatable read and phantom read, and attributing prevention to the transaction-scoped snapshot rather than per-statement snapshots
-    bloom_level: understand
+    verb: differentiate
+    object: write skew from the anomalies PostgreSQL Repeatable Read does prevent
+    condition: given two concurrent transactions running overlapping conditional updates under Repeatable Read
+    criterion: naming dirty read, non-repeatable read and phantom read as anomalies Repeatable Read does prevent, and correctly predicting that write skew is not prevented, naming the violated invariant and the final database state
+    bloom_level: analyze
     knowledge_type: conceptual
     prerequisites: [o1]
-
-  - ref: o3
-    verb: predict
-    object: whether a given pair of concurrent transactions produces write skew
-    condition: given two transactions running overlapping conditional updates under Repeatable Read
-    criterion: correctly, naming the violated invariant and the final database state
-    bloom_level: apply
-    knowledge_type: procedural
-    prerequisites: [o2]
 
   - ref: o4
     verb: evaluate
@@ -56,25 +83,34 @@ objectives:
     criterion: identifying the two rw-antidependency edges and the pivot transaction, and naming the 40001 serialization failure the application receives
     bloom_level: evaluate
     knowledge_type: procedural
-    prerequisites: [o3]
+    prerequisites: [o2]        # was o3, which no longer exists
     in_milestone_a: false      # video 2 — the continuity demo for Wedge A
 
-# Both items adapted from the extractor's own run-2 output (a4, a5) and reviewed
-# by hand. They are the standard the generator's items get measured against.
 assessment_items:
+  # a1 REPLACED at v3 and NOT REVIEWED — Sanket to check.
+  # The former a1 was understand-level ("give the second result under READ
+  # COMMITTED and under REPEATABLE READ") and would fail constructive alignment
+  # against an analyze-level objective. This replacement is analyze-level because
+  # it asks the learner to sort cases by a criterion rather than recall an
+  # outcome. Whether it is a GOOD item is a separate question from whether it is
+  # correctly levelled, and only the second has been checked.
   - ref: a1
     objective_ref: o2
-    bloom_level: understand
+    bloom_level: analyze
     kind: short
     stem: >-
-      Transaction A runs BEGIN, then SELECT sum(balance) FROM accounts, then
-      waits. Transaction B updates one row and commits. Transaction A now runs
-      the same SELECT again. Give the second result under READ COMMITTED and
-      under REPEATABLE READ, and explain the difference purely in terms of when
-      each isolation level takes its snapshot.
+      Here are four schedules, all run at REPEATABLE READ on PostgreSQL. (a) A
+      transaction reads a row twice with another transaction committing an update
+      between the reads. (b) A transaction reads rows matching a WHERE clause
+      twice, with another transaction inserting a matching row between the reads.
+      (c) Two transactions read the same two rows, then each updates a different
+      one of them, and both commit. (d) Two transactions both update the same row.
+      For each, say whether PostgreSQL prevents the anomaly, raises an error, or
+      lets it through silently. Then explain what distinguishes the one case that
+      commits silently and still breaks a rule from the three that do not.
 
   - ref: a2
-    objective_ref: o3
+    objective_ref: o2
     bloom_level: apply
     kind: predict
     stem: >-
@@ -102,8 +138,8 @@ assessment_items:
 
 extraction_notes:
   - >-
-      The dependency chain o1 -> o2 -> o3 -> o4 is strict. An extractor that
-      flattens it has failed.
+      The dependency chain o1 -> o2 -> o4 is strict. An extractor that flattens
+      it has failed. (Was o1 -> o2 -> o3 -> o4 before the v3 merge.)
   - >-
       PostgreSQL Repeatable Read is snapshot isolation and prevents phantom reads.
       The ANSI SQL standard's Repeatable Read permits them. An extractor that
@@ -118,7 +154,11 @@ extraction_notes:
       extractor that surfaces this contrast has done something better than the
       gold graph asks for. Note it, do not penalise it.
   - >-
-      Granularity is the known failure mode as of prompt v1. The model emitted 10
-      fine-grained objectives against these 4, reproducibly across two runs. The
-      objectives were individually sound but the size was wrong, so v2 of the
-      prompt adds the video-scoped granularity contract.
+      Granularity was the known failure mode as of prompt v1: the model emitted 10
+      fine-grained objectives against these, reproducibly across two runs, so v2
+      of the prompt added the video-scoped granularity contract.
+  - >-
+      o4 is deliberately outside Milestone A. An extraction that omits it and
+      declares it in out_of_scope is CORRECT and must be scored
+      excluded_by_scope, not missing. Scoring it missing punishes the behaviour
+      the prompt specifies.

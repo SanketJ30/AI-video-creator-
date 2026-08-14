@@ -125,8 +125,16 @@ class CourseBrief:
 
     def render_for_prompt(self) -> str:
         """What the extractor actually sees. Deterministic ordering — this
-        string enters a prompt whose output we cache on."""
-        return json.dumps(self.to_closure(), indent=2, sort_keys=True)
+        string enters a prompt whose output we cache on.
+
+        `ensure_ascii=False` so an em dash in the description reaches the model
+        as an em dash rather than as \u2014. It costs nothing, keeps the
+        prompt readable when a human inspects it, and makes "the brief reaches
+        the model verbatim" literally true. Hashing is unaffected: closures go
+        through `hashing.canonical_json`, not through here.
+        """
+        return json.dumps(self.to_closure(), indent=2, sort_keys=True,
+                          ensure_ascii=False)
 
     @classmethod
     def from_json(cls, obj: dict, version: int = 0) -> CourseBrief:

@@ -48,6 +48,10 @@ _STOP = {
 }
 MATCH_THRESHOLD = 0.22      # tuned to accept paraphrase, reject a different topic
 
+# A hand alignment's third verdict, alongside covered and missing. A gold
+# objective the run was never meant to teach is neither.
+EXCLUDED_BY_SCOPE = "excluded_by_scope"
+
 
 @dataclass
 class GoldGraph:
@@ -173,6 +177,12 @@ class GraphDiff:
     # gold ref -> extracted refs that together cover it (hand alignment only).
     coverage: dict[str, list[str]] = field(default_factory=dict)
     coverage_notes: dict[str, str] = field(default_factory=dict)
+    # Gold objectives a human has ruled deliberately out of this run's scope
+    # — in_milestone_a false, over the video budget, declared in
+    # out_of_scope. NOT missing: scoring them as missing punishes the exact
+    # behaviour the prompt specifies, which would train the next prompt
+    # version toward over-emitting.
+    excluded: list[str] = field(default_factory=list)
 
     @property
     def approximate(self) -> bool:
@@ -205,6 +215,9 @@ class GraphDiff:
                 out.append(f"    {gref:<5} <- {', '.join(self.coverage[gref])}")
             for ref in self.missing:
                 out.append(f"    {ref:<5} <- (nothing)   MISSING")
+            for ref in self.excluded:
+                out.append(f"    {ref:<5} <- (nothing)   excluded by scope, "
+                           f"not counted")
             if self.extra:
                 out.append(f"    unmapped extracted: {', '.join(self.extra)}")
         else:
@@ -272,6 +285,9 @@ class AlignmentRun:
     verdict: str = ""
     coverage: dict[str, list[str]] = field(default_factory=dict)
     coverage_notes: dict[str, str] = field(default_factory=dict)
+    # gold ref -> the human's verdict. `excluded_by_scope` is load-bearing:
+    # see GraphDiff.excluded.
+    coverage_verdicts: dict[str, str] = field(default_factory=dict)
     unmapped_extracted: list[str] = field(default_factory=list)
 
 
@@ -316,12 +332,14 @@ def load_alignment(path: str | Path) -> AlignmentFile:
     doc = yaml.safe_load(p.read_text(encoding="utf-8")) or {}
     runs = []
     for raw in doc.get("runs") or []:
-        cov, notes = {}, {}
+        cov, notes, verdicts = {}, {}, {}
         for gref, entry in (raw.get("coverage") or {}).items():
             if isinstance(entry, dict):
                 cov[str(gref)] = [str(x) for x in (entry.get("extracted") or [])]
                 if entry.get("comment"):
                     notes[str(gref)] = str(entry["comment"])
+                if entry.get("verdict"):
+                    verdicts[str(gref)] = str(entry["verdict"])
             else:                                   # bare list shorthand
                 cov[str(gref)] = [str(x) for x in (entry or [])]
         runs.append(AlignmentRun(
@@ -333,7 +351,7 @@ def load_alignment(path: str | Path) -> AlignmentFile:
                              if raw.get("extracted_count") is not None else None),
             note=str(raw.get("note") or ""),
             verdict=str(raw.get("verdict") or ""),
-            coverage=cov, coverage_notes=notes,
+            coverage=cov, coverage_notes=notes, coverage_verdicts=verdicts,
             unmapped_extracted=[str(x) for x in (raw.get("unmapped_extracted") or [])],
         ))
     return AlignmentFile(path=p, gold_file=str(doc.get("gold_file") or ""), runs=runs)
@@ -363,8 +381,21 @@ def diff_with_alignment(extracted: list[Objective], gold: GoldGraph,
             f"{unknown}. It was written for a different run — re-record it, or "
             f"drop --alignment to fall back to the approximate scorer.")
 
+    # The same staleness, from the other side: an entry written before the
+    # gold was amended can name a gold objective that no longer exists. Its
+    # coverage judgment for that ref is meaningless and the rest is suspect.
+    stale_gold = sorted(set(run.coverage) - set(gld))
+    if stale_gold:
+        raise ValueError(
+            f"alignment {source} covers gold refs that {gold.path.name} no "
+            f"longer has: {stale_gold}. The gold was amended after this entry "
+            f"was written — record a new run rather than reusing it.")
+
     covered = {g: [ext[r] for r in refs] for g, refs in run.coverage.items() if refs}
-    d.missing = sorted(g.ref for g in gold.objectives if not covered.get(g.ref))
+    d.excluded = sorted(ref for ref, v in run.coverage_verdicts.items()
+                        if v == EXCLUDED_BY_SCOPE)
+    d.missing = sorted(g.ref for g in gold.objectives
+                       if not covered.get(g.ref) and g.ref not in d.excluded)
     mapped = {r for refs in run.coverage.values() for r in refs}
     d.extra = sorted(set(ext) - mapped)
 
@@ -388,6 +419,9 @@ def diff_with_alignment(extracted: list[Objective], gold: GoldGraph,
     # group is a direct prerequisite of any member of the later one. Direct, not
     # transitive — a flattened chain must still fail (gold note 1).
     for a, b in sorted(gold.edges()):
+        # An edge into or out of an excluded objective is not a missing edge.
+        if a in d.excluded or b in d.excluded:
+            continue
         if not covered.get(a) or not covered.get(b):
             continue
         a_refs = {e.ref for e in covered[a]}

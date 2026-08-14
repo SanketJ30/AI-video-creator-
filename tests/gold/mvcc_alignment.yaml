@@ -356,3 +356,61 @@ runs:
       puts compare/contrast there — the first time §8's second conceptual branch
       has been exercised by real data. Two gold objectives (o2, o3) now share
       one extracted objective, which is new and worth a human's opinion.
+
+  # ---------------------------------------------------------------------------
+  # DRAFTED BY CLAUDE CODE, 14 Aug 2026 — NOT reviewed by a human.
+  # First run against the AMENDED gold (gold v3: o2 and o3 merged, topic widened).
+  # ---------------------------------------------------------------------------
+  - run: v3-run3
+    prompt_version: objective_extractor@v3
+    brief_version: 3
+    model: claude-opus-5 (MODEL_FRONTIER as pinned 14 Aug 2026)
+    extracted_count: 5
+    note: >-
+      Brief realigned to the gold's amended topic: line, which now names three
+      things — snapshots, the anomaly taxonomy, and SSI. The extractor picked up
+      SSI and DROPPED the taxonomy: o2's criterion names Serializable and the
+      40001 retry but not dirty read, non-repeatable read or phantom read. That
+      is the opposite trade from v3-run2, which had the taxonomy and no SSI.
+      Same prompt, same max_videos=1, different brief. Read the verdict below
+      before treating this as a regression.
+
+    coverage:
+      o1:
+        extracted: [o1]
+        verdict: covered_but_reframed
+        comment: >-
+          Gold o1 is snapshot isolation, assumed. Extracted o1 teaches the same
+          mechanism as a taught apply-level objective. Unchanged across four runs.
+
+      o2:
+        extracted: [o2]
+        verdict: partial
+        comment: >-
+          UNSURE — and a different partial from before. The merged gold o2 asks
+          for write skew differentiated from the three anomalies RR does
+          prevent. Extracted o2 diagnoses write skew correctly, names the
+          invariant, explains it in terms of snapshots, and names SSI as the
+          level that aborts — but never names dirty read, non-repeatable read or
+          phantom read. v3-run2, against the NARROWER topic line, did name all
+          three. Bloom now matches (analyze/analyze), which v3-run2 did not.
+
+      o4:
+        extracted: []
+        verdict: excluded_by_scope
+        comment: >-
+          Resolved by Sanket 14 Aug: o4 is in_milestone_a false, max_videos is 1,
+          and out_of_scope names SSI and the remedies. The extractor did what the
+          prompt asked. Scored excluded_by_scope and NOT counted against the run.
+
+    unmapped_extracted: [o3, o4, o5]
+    verdict: >-
+      One gold objective covered, one partial, one excluded by scope. The
+      finding worth carrying forward is not the coverage count: it is that
+      widening the topic: line to imply the full graph made the in-scope
+      criterion HARDER to hit. The topic now names SSI, which lives in o4 and is
+      explicitly out of Milestone A, and under a one-video budget the extractor
+      spent its single analyze-level criterion on SSI instead of the taxonomy.
+      The topic: line describes the course; max_videos describes one video; they
+      now pull against each other. Flagged for Sanket — this is a gold/brief
+      design question, not something to fix by iterating the prompt.

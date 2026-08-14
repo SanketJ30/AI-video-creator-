@@ -481,6 +481,8 @@ def objectives_diff(
         typer.echo("the gold file's own notes on what to watch for:")
         for n in gold.notes:
             typer.echo(f"  - {n.strip()}")
+    # d.excluded is deliberately absent: a gold objective ruled out of scope
+    # is not a defect in the run.
     clean = not (d.missing or d.extra or d.bloom or d.missing_edges or d.extra_edges)
     raise typer.Exit(0 if clean else 1)
 

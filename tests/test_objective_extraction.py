@@ -32,7 +32,9 @@ from explainer.escalation import Escalated
 from explainer.objectives import Bloom
 
 GOLD_PATH = Path(__file__).parent / "gold" / "mvcc_write_skew.yaml"
-CHAIN = ["o1", "o2", "o3", "o4"]
+# The gold's v3 amendment merged the old o2 and o3 into one
+# analyze-level objective; the chain lost a link.
+CHAIN = ["o1", "o2", "o4"]
 
 
 # ------------------------------------------------------------------ fixtures
@@ -145,7 +147,7 @@ def _graph_json(**overrides) -> str:
 def test_gold_file_parses_and_is_internally_consistent():
     gold = goldgraph.load_gold(GOLD_PATH)
     assert [o.ref for o in gold.objectives] == CHAIN
-    assert gold.edges() == {("o1", "o2"), ("o2", "o3"), ("o3", "o4")}
+    assert gold.edges() == {("o1", "o2"), ("o2", "o4")}
     assert gold.by_ref()["o1"].assumed is True
     assert gold.scope["o4"] is False, "o4 is video 2, out of Milestone A"
     assert gold.notes, "the gold file's extraction notes are part of the standard"
@@ -156,7 +158,8 @@ def test_gold_graph_passes_the_deterministic_checks():
     assessment items the author has flagged as TODO. If the human-authored
     standard cannot pass its own linter, the linter is wrong."""
     from explainer.objectives import validate
-    r = validate(goldgraph.load_gold(GOLD_PATH).objectives)   # no items yet
+    gold = goldgraph.load_gold(GOLD_PATH)
+    r = validate(gold.objectives, items=gold.items)
     assert r.ok, r.render()
     assert r.teaching_order == CHAIN
 
@@ -183,7 +186,7 @@ def test_diff_catches_a_flattened_chain():
     ]
     d = goldgraph.diff(flat, gold)
     assert not d.missing, "all four objectives are still present"
-    assert d.missing_edges == [("o1", "o2"), ("o2", "o3"), ("o3", "o4")]
+    assert d.missing_edges == [("o1", "o2"), ("o2", "o4")]
     assert not d.chain_intact(CHAIN)
 
 
@@ -191,7 +194,7 @@ def test_diff_matches_on_content_not_on_ref():
     """Refs are arbitrary labels; a renumbered graph is not a wrong graph."""
     gold = goldgraph.load_gold(GOLD_PATH)
     renamed = []
-    remap = {"o1": "L4", "o2": "L3", "o3": "L2", "o4": "L1"}
+    remap = {"o1": "L3", "o2": "L2", "o4": "L1"}
     for o in gold.objectives:
         renamed.append(type(o)(
             ref=remap[o.ref], verb=o.verb, object=o.object,
@@ -206,13 +209,13 @@ def test_diff_matches_on_content_not_on_ref():
 def test_diff_reports_a_bloom_level_that_is_off_by_one():
     gold = goldgraph.load_gold(GOLD_PATH)
     objs = list(gold.objectives)
-    o3 = objs[2]
-    objs[2] = type(o3)(ref=o3.ref, verb="analyse", object=o3.object,
-                       bloom_level=Bloom.ANALYZE, knowledge_type=o3.knowledge_type,
-                       condition=o3.condition, criterion=o3.criterion,
-                       prerequisites=o3.prerequisites, assumed=o3.assumed)
+    o2 = objs[1]
+    objs[1] = type(o2)(ref=o2.ref, verb="compare", object=o2.object,
+                       bloom_level=Bloom.EVALUATE, knowledge_type=o2.knowledge_type,
+                       condition=o2.condition, criterion=o2.criterion,
+                       prerequisites=o2.prerequisites, assumed=o2.assumed)
     d = goldgraph.diff(objs, gold)
-    assert [m.gold_ref for m in d.bloom] == ["o3"]
+    assert [m.gold_ref for m in d.bloom] == ["o2"]
     assert d.max_bloom_distance == 1
 
 
