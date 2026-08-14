@@ -16,7 +16,7 @@ import sys
 import typer
 
 from . import brief as brief_mod
-from . import coursegraph, db, goldgraph, orchestrator, worker
+from . import coursegraph, db, gagne, goldgraph, prose, orchestrator, worker
 from . import manifest as manifest_mod
 from .agents import objective_extractor
 from .config import settings
@@ -32,12 +32,18 @@ course_app = typer.Typer(no_args_is_help=True,
                          help="Courses and the Course Brief (§6 Stage 1).")
 objectives_app = typer.Typer(no_args_is_help=True,
                              help="The objective graph (§5.3) — the course spine.")
+curriculum_app = typer.Typer(no_args_is_help=True,
+                             help="Curriculum planning (§6 Stage 2b).")
+script_app = typer.Typer(no_args_is_help=True,
+                         help="Script generation into Gagné slots (§6 Stage 2c).")
 app.add_typer(db_app, name="db")
 app.add_typer(series_app, name="series")
 app.add_typer(video_app, name="video")
 app.add_typer(beat_app, name="beat")
 app.add_typer(course_app, name="course")
 app.add_typer(objectives_app, name="objectives")
+app.add_typer(curriculum_app, name="curriculum")
+app.add_typer(script_app, name="script")
 
 err = typer.style
 
@@ -487,6 +493,230 @@ def objectives_escalations(slug: str | None = typer.Argument(None)) -> None:
                    f"[{r['error_class']}] {r['error'][:90]}")
         typer.echo(f"    next step: {r['next_step']}")
     typer.echo(f"{len(rows)} open")
+
+
+# ---------------------------------------------------------------- curriculum
+
+@curriculum_app.command("plan")
+def curriculum_plan(slug: str,
+                    show_raw: bool = typer.Option(False, "--raw")) -> None:
+    """Group taught objectives into videos (§6 Stage 2b).
+
+    The order is not a choice: it comes from the objective DAG's topological
+    sort, and a plan that contradicts it is a hard error, not a finding.
+    """
+    from .agents import curriculum_planner as cp
+    from .escalation import Escalated
+    with db.tx() as conn:
+        course_id = brief_mod.course_id_for(conn, slug)
+        b = brief_mod.load(conn, course_id)
+        graph = coursegraph.load(conn, course_id)
+        if not graph.objectives:
+            typer.echo(f"no objective graph for '{slug}' — run "
+                       f"`explainer objectives extract {slug}` first", err=True)
+            raise typer.Exit(1)
+        try:
+            result = cp.plan(conn, course_id, b, graph.objectives,
+                             graph.teaching_order)
+        except Escalated as e:
+            typer.echo(typer.style(e.render(), fg=typer.colors.MAGENTA), err=True)
+            raise typer.Exit(2) from None
+        except cp.PlanError as e:
+            typer.echo(typer.style(f"PLAN REJECTED: {e}", fg=typer.colors.RED), err=True)
+            typer.echo("This is a structural failure, not a quality one — the plan "
+                       "cannot be used and was not saved.", err=True)
+            raise typer.Exit(2) from None
+
+        if show_raw:
+            for a in result.attempts:
+                typer.echo(typer.style(f"--- raw, attempt {a.n} ---",
+                                       fg=typer.colors.BRIGHT_BLACK))
+                typer.echo(a.raw)
+        cp.save(conn, course_id, result, cp.objective_ids_for(conn, course_id))
+
+    for v in result.videos:
+        typer.echo(f"{v.ordinal}. {v.ref:<4} [{v.script_type}] {v.title}")
+        typer.echo(f"       objectives: {', '.join(v.objective_refs)}  "
+                   f"budget: {v.target_seconds}s")
+        if v.rationale:
+            typer.echo(typer.style(f"       {v.rationale}",
+                                   fg=typer.colors.BRIGHT_BLACK))
+    typer.echo("")
+    typer.echo(f"{len(result.videos)} video(s), {len(result.attempts)} model call(s), "
+               f"${result.cost_usd:.4f}")
+    if result.notes:
+        typer.echo("")
+        typer.echo(typer.style(f"planner notes: {result.notes}", fg=typer.colors.CYAN))
+
+
+@curriculum_app.command("show")
+def curriculum_show(slug: str) -> None:
+    """The stored plan."""
+    from .agents import curriculum_planner as cp
+    with db.tx() as conn:
+        course_id = brief_mod.course_id_for(conn, slug)
+        rows = cp.load(conn, course_id)
+    if not rows:
+        typer.echo(f"no curriculum plan for '{slug}' — run "
+                   f"`explainer curriculum plan {slug}`", err=True)
+        raise typer.Exit(1)
+    for r in rows:
+        typer.echo(f"{r['ordinal']}. {r['ref']:<4} [{r['script_type']}] {r['title']}")
+        typer.echo(f"       objectives: {', '.join(r['objective_refs'])}  "
+                   f"budget: {r['target_seconds']}s")
+    typer.echo(f"\n{len(rows)} video(s)")
+
+
+# -------------------------------------------------------------------- script
+
+def _script_context(conn, slug: str, video_ref: str):
+    from .agents import script_writer as sw
+    course_id = brief_mod.course_id_for(conn, slug)
+    return course_id, sw.video_row(conn, course_id, video_ref)
+
+
+@script_app.command("generate")
+def script_generate(slug: str, video_ref: str,
+                    show_raw: bool = typer.Option(False, "--raw"),
+                    raw_out: str | None = typer.Option(None, "--raw-out")) -> None:
+    """Fill one video's Gagné slot form (§6 Stage 2c)."""
+    from .agents import script_writer as sw
+    from .escalation import Escalated
+    with db.tx() as conn:
+        course_id, video = _script_context(conn, slug, video_ref)
+        b = brief_mod.load(conn, course_id)
+        graph = coursegraph.load(conn, course_id)
+        try:
+            draft = sw.generate(conn, course_id, b, video, graph.objectives)
+        except Escalated as e:
+            typer.echo(typer.style(e.render(), fg=typer.colors.MAGENTA), err=True)
+            raise typer.Exit(2) from None
+        except gagne.BudgetError as e:
+            typer.echo(typer.style(f"BUDGET: {e}", fg=typer.colors.RED), err=True)
+            raise typer.Exit(2) from None
+
+        if show_raw:
+            for a in draft.attempts:
+                typer.echo(typer.style(
+                    f"--- raw, attempt {a.n} ({a.input_tokens} in / "
+                    f"{a.output_tokens} out) ---", fg=typer.colors.BRIGHT_BLACK))
+                typer.echo(a.raw)
+        if raw_out:
+            with open(raw_out, "w", encoding="utf-8") as fh:
+                jsonlib.dump([{"attempt": a.n, "raw": a.raw, "error": a.error,
+                               "input_tokens": a.input_tokens,
+                               "cache_creation_tokens": a.cache_creation_tokens,
+                               "cache_read_tokens": a.cache_read_tokens,
+                               "output_tokens": a.output_tokens} for a in draft.attempts],
+                             fh, indent=2)
+            typer.echo(f"raw responses written to {raw_out}")
+
+        sw.save(conn, str(video["id"]), draft,
+                {o.ref: i for o, i in _objective_id_map(conn, course_id)})
+        scenes = sw.load(conn, str(video["id"]))
+        report = prose.check_script(scenes, technical=True)
+        prose.save_findings(conn, str(video["id"]), report,
+                            _scene_id_map(conn, str(video["id"])))
+
+    typer.echo(f"{len(draft.scenes)} scenes, {len(draft.attempts)} model call(s), "
+               f"${draft.cost_usd:.4f}")
+    typer.echo("")
+    typer.echo(typer.style(report.render(),
+                           fg=typer.colors.GREEN if report.ok else typer.colors.RED))
+    raise typer.Exit(0 if report.ok else 1)
+
+
+def _objective_id_map(conn, course_id: str):
+    from .agents import curriculum_planner as cp
+    ids = cp.objective_ids_for(conn, course_id)
+    graph = coursegraph.load(conn, course_id)
+    return [(o, ids[o.ref]) for o in graph.objectives if o.ref in ids]
+
+
+def _scene_id_map(conn, video_id: str) -> dict:
+    return {r["ref"]: str(r["id"]) for r in db.query(
+        conn, "select id, ref from scenes where video_id = %s", (video_id,))}
+
+
+@script_app.command("show")
+def script_show(slug: str, video_ref: str,
+                spans: bool = typer.Option(True, "--spans/--no-spans",
+                                           help="render span ids (Gate A needs them)")) -> None:
+    """Slots, narration, span ids and findings for one video.
+
+    Span ids are shown by default because a human reviewing at Gate A needs to
+    see what a cue could anchor to (R3/R4) — a wall of prose hides the thing the
+    storyboard will point at.
+    """
+    from .agents import script_writer as sw
+    with db.tx() as conn:
+        course_id, video = _script_context(conn, slug, video_ref)
+        scenes = sw.load(conn, str(video["id"]))
+        findings = db.query(conn, """
+            select rule, severity, message, s.ref as scene_ref
+              from linter_findings lf left join scenes s on s.id = lf.scene_id
+             where lf.video_id = %s order by lf.severity, s.ref""",
+                            (str(video["id"]),))
+    if not scenes:
+        typer.echo(f"no script for '{video_ref}' — run "
+                   f"`explainer script generate {slug} {video_ref}`", err=True)
+        raise typer.Exit(1)
+
+    typer.echo(f"{video['ref']}  [{video['script_type']}]  {video['title']}")
+    typer.echo(f"budget {video['target_seconds']}s  objectives "
+               f"{', '.join(video['objective_refs'])}")
+    typer.echo("")
+    by_scene: dict = {}
+    for f in findings:
+        by_scene.setdefault(f["scene_ref"], []).append(f)
+
+    for s in scenes:
+        meta = s["pedagogy_meta"] or {}
+        dur = "null" if s["duration_value"] is None else str(s["duration_value"])
+        typer.echo(typer.style(
+            f"{s['ordinal']:>2}. {s['ref']}  {s['gagne_slot']:<10} "
+            f"target {meta.get('duration_target_seconds')}s  duration={dur}  "
+            f"{s['timing_sensitivity']}  obj={s['objective_ref']}  "
+            f"load={meta.get('element_interactivity')}",
+            fg=typer.colors.CYAN))
+        if meta.get("new_terms"):
+            typer.echo(f"      new terms: {', '.join(meta['new_terms'])}")
+        for sp in (s["narration"] or []):
+            if spans:
+                typer.echo(f"      {typer.style(sp['id'], fg=typer.colors.BRIGHT_BLACK)}"
+                           f"  {sp['text']}")
+            else:
+                typer.echo(f"      {sp['text']}")
+        for f in by_scene.get(s["ref"], []):
+            colour = typer.colors.RED if f["severity"] == "blocking" else typer.colors.YELLOW
+            typer.echo(typer.style(f"      [{f['severity'].upper()}] {f['rule']}: "
+                                   f"{f['message']}", fg=colour))
+        typer.echo("")
+
+    total_spans = sum(len(s["narration"] or []) for s in scenes)
+    typer.echo(f"{len(scenes)} scenes, {total_spans} spans, {len(findings)} findings")
+
+
+@script_app.command("gates")
+def script_gates(slug: str, video_ref: str,
+                 save: bool = typer.Option(False, "--save",
+                                           help="rewrite linter_findings")) -> None:
+    """Just the prose gate report (§9.6 deterministic gates)."""
+    from .agents import script_writer as sw
+    with db.tx() as conn:
+        course_id, video = _script_context(conn, slug, video_ref)
+        scenes = sw.load(conn, str(video["id"]))
+        if not scenes:
+            typer.echo(f"no script for '{video_ref}'", err=True)
+            raise typer.Exit(1)
+        report = prose.check_script(scenes, technical=True)
+        if save:
+            n = prose.save_findings(conn, str(video["id"]), report,
+                                    _scene_id_map(conn, str(video["id"])))
+            typer.echo(f"{n} findings written to linter_findings")
+    typer.echo(typer.style(report.render(),
+                           fg=typer.colors.GREEN if report.ok else typer.colors.RED))
+    raise typer.Exit(0 if report.ok else 1)
 
 
 # ---------------------------------------------------------------------- beat
