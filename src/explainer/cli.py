@@ -16,7 +16,7 @@ import sys
 import typer
 
 from . import brief as brief_mod
-from . import coursegraph, db, gagne, goldgraph, prose, orchestrator, worker
+from . import coursegraph, db, gagne, goldgraph, linter, prose, orchestrator, worker
 from . import manifest as manifest_mod
 from .agents import objective_extractor
 from .config import settings
@@ -38,6 +38,8 @@ script_app = typer.Typer(no_args_is_help=True,
                          help="Script generation into Gagné slots (§6 Stage 2c).")
 harness_app = typer.Typer(no_args_is_help=True,
                           help="The §14.4 regression harness — multi-sample.")
+storyboard_app = typer.Typer(no_args_is_help=True,
+                             help="Storyboard: templates and cues (§6 Stage 2d, §10).")
 app.add_typer(db_app, name="db")
 app.add_typer(series_app, name="series")
 app.add_typer(video_app, name="video")
@@ -47,6 +49,7 @@ app.add_typer(objectives_app, name="objectives")
 app.add_typer(curriculum_app, name="curriculum")
 app.add_typer(script_app, name="script")
 app.add_typer(harness_app, name="harness")
+app.add_typer(storyboard_app, name="storyboard")
 
 err = typer.style
 
@@ -836,6 +839,239 @@ def script_gates(slug: str, video_ref: str,
     typer.echo(typer.style(report.render(),
                            fg=typer.colors.GREEN if report.ok else typer.colors.RED))
     raise typer.Exit(0 if report.ok else 1)
+
+
+# ------------------------------------------------------------------ storyboard
+
+@storyboard_app.command("plan")
+def storyboard_plan(slug: str, video_ref: str,
+                    signals: bool = typer.Option(
+                        True, "--signals/--no-signals",
+                        help="also place cues (§9.2); --no-signals stops after "
+                             "templates so the visual pass can be reviewed first"),
+                    show_raw: bool = typer.Option(False, "--raw")) -> None:
+    """Choose a template per scene and place its cues (§6 Stage 2d).
+
+    Two model calls, in order, because the second needs the first's output: the
+    signal designer can only anchor a cue to a slot that a filled template
+    actually has. Both write onto `scenes.visual_spec`; neither touches
+    narration, duration or ordinal.
+    """
+    from .agents import script_writer as sw
+    from .agents import signal_designer as sd
+    from .agents import visual_planner as vp
+    from .escalation import Escalated
+
+    cost = 0.0
+    with db.tx() as conn:
+        course_id, video = _script_context(conn, slug, video_ref)
+        rows = sw.load(conn, str(video["id"]))
+        if not rows:
+            typer.echo(f"no script for '{video_ref}' — run "
+                       f"`explainer script generate {slug} {video_ref}` first",
+                       err=True)
+            raise typer.Exit(1)
+        b = brief_mod.load(conn, course_id)
+        graph = coursegraph.load(conn, course_id)
+        try:
+            vplan = vp.plan(conn, course_id, b, video, rows, graph.objectives)
+        except Escalated as e:
+            typer.echo(err(e.render(), fg=typer.colors.MAGENTA), err=True)
+            raise typer.Exit(2) from None
+        if show_raw:
+            _echo_raw("visual_planner", vplan.attempts)
+        vp.save(conn, str(video["id"]), vplan)
+        cost += vplan.cost_usd
+        typer.echo(f"visual_planner: {len(vplan.scenes)} scenes, "
+                   f"{len(vplan.attempts)} model call(s), ${vplan.cost_usd:.4f}")
+
+        splan = None
+        if signals:
+            # Reload: the signal designer needs the filled slots the visual
+            # planner just wrote, not the pre-plan rows.
+            rows = sw.load(conn, str(video["id"]))
+            try:
+                splan = sd.design(conn, course_id, video, rows)
+            except Escalated as e:
+                typer.echo(err(e.render(), fg=typer.colors.MAGENTA), err=True)
+                raise typer.Exit(2) from None
+            if show_raw:
+                _echo_raw("signal_designer", splan.attempts)
+            sd.save(conn, str(video["id"]), splan)
+            cost += splan.cost_usd
+            typer.echo(f"signal_designer: {splan.cue_count} cues, "
+                       f"{len(splan.attempts)} model call(s), "
+                       f"${splan.cost_usd:.4f}")
+
+        rows = sw.load(conn, str(video["id"]))
+        report = linter.lint(linter.scene_views(rows))
+        linter.save_findings(conn, str(video["id"]), report,
+                             _scene_id_map(conn, str(video["id"])))
+
+    typer.echo(f"total ${cost:.4f}")
+    typer.echo("")
+    typer.echo(_render_lint(report))
+    raise typer.Exit(0 if report.ok else 1)
+
+
+def _echo_raw(agent: str, attempts) -> None:
+    for a in attempts:
+        typer.echo(err(f"--- {agent} raw, attempt {a.n} ({a.input_tokens} in / "
+                       f"{a.output_tokens} out) ---",
+                       fg=typer.colors.BRIGHT_BLACK))
+        typer.echo(a.raw)
+
+
+@storyboard_app.command("show")
+def storyboard_show(slug: str, video_ref: str,
+                    rationale: bool = typer.Option(
+                        True, "--rationale/--no-rationale",
+                        help="§10: why each template and cue was chosen")) -> None:
+    """The storyboard as a human reviews it (§10, the control surface).
+
+    Rationale is shown by default. §10 makes the storyboard the surface a human
+    edits, and a template choice with no stated reason is one a reviewer can
+    only accept or reject — not correct.
+    """
+    from .agents import script_writer as sw
+    with db.tx() as conn:
+        course_id, video = _script_context(conn, slug, video_ref)
+        rows = sw.load(conn, str(video["id"]))
+    if not rows:
+        typer.echo(f"no script for '{video_ref}'", err=True)
+        raise typer.Exit(1)
+    planned = [r for r in rows if (r["visual_spec"] or {}).get("template")]
+    if not planned:
+        typer.echo(f"no storyboard for '{video_ref}' — run "
+                   f"`explainer storyboard plan {slug} {video_ref}`", err=True)
+        raise typer.Exit(1)
+
+    typer.echo(f"{video['ref']}  [{video['script_type']}]  {video['title']}")
+    typer.echo("")
+    total_cues = 0
+    for r in rows:
+        spec = r["visual_spec"] or {}
+        slots = spec.get("slots") or {}
+        cues = spec.get("cues") or []
+        total_cues += len(cues)
+        meta = r["pedagogy_meta"] or {}
+        typer.echo(err(f"{r['ordinal']:>2}. {r['ref']}  {r['gagne_slot']:<10} "
+                       f"{spec.get('template') or '(no template)':<22} "
+                       f"{spec.get('motion', '-'):<8} "
+                       f"target {meta.get('duration_target_seconds')}s  "
+                       f"{len(cues)} cue(s)", fg=typer.colors.CYAN))
+        if rationale and spec.get("rationale"):
+            typer.echo(f"      why: {spec['rationale']}")
+        if rationale and spec.get("what_changes"):
+            typer.echo(f"      changes: {spec['what_changes']}")
+        if rationale:
+            # §10's control surface: each named decision, its value, and the
+            # rule that produced it, so a reviewer can see which choices were
+            # the model's and which fell out of a deterministic rule.
+            for name, d in (spec.get("decisions") or {}).items():
+                typer.echo(err(f"      · {name} = {d.get('value')}  "
+                               f"[{d.get('rule')}]",
+                               fg=typer.colors.BRIGHT_BLACK))
+        for name, value in slots.items():
+            typer.echo(f"      {name}: {jsonlib.dumps(value, ensure_ascii=False)}")
+        why = spec.get("cue_rationales") or []
+        for i, c in enumerate(cues):
+            span = (c.get("anchor") or {}).get("spanId", "?")
+            off = ((c.get("anchor") or {}).get("offset") or {}).get("value", 0)
+            typer.echo(f"      {err('cue', fg=typer.colors.BRIGHT_BLACK)} "
+                       f"{c.get('kind'):<12} -> {c.get('target'):<18} "
+                       f"@ {span} {off:+d}ms")
+            if rationale and i < len(why) and why[i]:
+                typer.echo(err(f"          {why[i]}", fg=typer.colors.BRIGHT_BLACK))
+        typer.echo("")
+    typer.echo(f"{len(planned)}/{len(rows)} scenes planned, {total_cues} cues")
+
+
+# ------------------------------------------------------------------ lint
+
+@app.command()
+def lint(slug: str, video_ref: str,
+         accessibility: bool = typer.Option(
+             True, "--a11y/--no-a11y", help="also run the §16.2 WCAG gates"),
+         save: bool = typer.Option(False, "--save",
+                                   help="rewrite linter_findings")) -> None:
+    """Every deterministic pedagogy and accessibility gate on one video.
+
+    §9.6 and §16.2 both split their rules into what code can decide and what
+    needs a model or a rendered frame. Both reports print what they did NOT
+    check, because on a customer-visible report (§4.3) a silent absence reads
+    as a pass.
+    """
+    from .agents import script_writer as sw
+    from . import a11y
+    with db.tx() as conn:
+        course_id, video = _script_context(conn, slug, video_ref)
+        rows = sw.load(conn, str(video["id"]))
+        if not rows:
+            typer.echo(f"no script for '{video_ref}'", err=True)
+            raise typer.Exit(1)
+        scenes = linter.scene_views(rows)
+        report = linter.lint(scenes)
+        if save:
+            linter.save_findings(conn, str(video["id"]), report,
+                                 _scene_id_map(conn, str(video["id"])))
+        # No palette exists in the system yet, so this reports contrast as
+        # unresolved rather than passing. See a11y.UNRESOLVED_INPUTS.
+        a11y_report = a11y.lint_accessibility(scenes) if accessibility else None
+
+    typer.echo(_render_lint(report))
+    if a11y_report is not None:
+        typer.echo("")
+        typer.echo(err("=== §16.2 accessibility ===", fg=typer.colors.BRIGHT_BLACK))
+        typer.echo(a11y_report.render())
+    ok = report.ok and (a11y_report is None or a11y_report.ok)
+    raise typer.Exit(0 if ok else 1)
+
+
+_SEVERITY_COLOUR = {"blocking": typer.colors.RED,
+                    "warning": typer.colors.YELLOW,
+                    "info": typer.colors.BRIGHT_BLACK}
+
+
+def _render_lint(report) -> str:
+    """Grouped by severity, with the measured value beside its threshold.
+
+    A finding that says "too much text" and nothing else cannot be acted on.
+    Every line here carries what was measured and what the rule allows, so a
+    human can tell a near miss from a gross one without opening the code.
+    """
+    lines: list[str] = []
+    for sev in ("blocking", "warning", "info"):
+        group = [f for f in report.findings if f.severity == sev]
+        if not group:
+            continue
+        lines.append(err(f"{sev.upper()} ({len(group)})",
+                         fg=_SEVERITY_COLOUR[sev], bold=True))
+        for f in sorted(group, key=lambda x: (x.subject, x.rule)):
+            lines.append(err(f"  [{f.subject}] {f.rule}: {f.message}",
+                             fg=_SEVERITY_COLOUR[sev]))
+            if f.measured or f.threshold:
+                lines.append(f"        measured {_kv(f.measured)}"
+                             f"   allowed {_kv(f.threshold)}")
+            if f.measured.get("authored"):
+                lines.append(err("        (this threshold is AUTHORED AND "
+                                 "UNREVIEWED — it is not in v0.2)",
+                                 fg=typer.colors.BRIGHT_BLACK))
+            if f.fix:
+                lines.append(f"        fix: {f.fix}")
+    if not report.findings:
+        lines.append(err("no findings", fg=typer.colors.GREEN))
+    lines.append("")
+    lines.append(err("NOT CHECKED (so 'no finding' here is not 'passes'):",
+                     fg=typer.colors.BRIGHT_BLACK))
+    for rule, why in sorted(report.not_implemented.items()):
+        lines.append(err(f"  {rule}: {' '.join(why.split())}",
+                         fg=typer.colors.BRIGHT_BLACK))
+    return "\n".join(lines)
+
+
+def _kv(d: dict) -> str:
+    return ", ".join(f"{k}={v}" for k, v in d.items() if k != "authored") or "-"
 
 
 # ---------------------------------------------------------------------- beat

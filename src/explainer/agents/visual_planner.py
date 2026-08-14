@@ -138,6 +138,12 @@ class ScenePlan:
             "motion": self.motion,
             "referent_changes_over_time": self.referent_changes_over_time,
             "what_changes": self.what_changes,
+            # §10 makes the storyboard the surface a human edits, and a template
+            # choice with no stated reason is one a reviewer can only accept or
+            # reject, never correct. The model is required to produce this and
+            # `parse` keeps it; it was being dropped here until the review CLI
+            # went looking for it.
+            "rationale": self.rationale,
             "decisions": {d.name: d.to_json() for d in self.decisions},
             "provenance": provenance,
         }

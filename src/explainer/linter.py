@@ -200,13 +200,32 @@ _TEXT_KEYS = ("label", "text", "title", "subtitle", "caption", "phrase",
               "emphasis", "invariant")
 
 
-def on_screen_strings(slots: dict) -> list[str]:
+def on_screen_strings(slots: dict, template_name: str = "") -> list[str]:
     """Every string a viewer would read, walked out of the filled slots.
 
-    Only text-bearing keys are harvested: a node's `id` is an addressing
-    handle, not something on screen, and counting it would inflate every text
-    measurement in this module.
+    Two things are excluded, and both were found by measuring rather than by
+    reading the code:
+
+    * **Addressing handles.** A node's `id`, `focus`, `chart`, `highlight_row`
+      are how a cue names a thing, not something on screen. Harvesting them
+      inflated every §9.3 and §9.4 measurement.
+    * **Briefs for the imagery.** `cold_open.premise` and
+      `concept_illustration.subject` describe what the shot DEPICTS; nothing is
+      typeset from them. The template declares this (`Param.on_screen`), and it
+      is consulted whenever the template is known — which is why `template_name`
+      is worth threading through. Without it, §9.4's priority rule fired on two
+      scenes of the real MVCC video that display no text at all.
     """
+    skip: set[str] = set()
+    if template_name:
+        try:
+            skip = {p.name for p in templates.get(template_name).params
+                    if not p.on_screen}
+        except KeyError:
+            # An unknown template is reported by check_multimedia; measuring it
+            # with the default key set is better than measuring nothing.
+            skip = set()
+
     out: list[str] = []
 
     def walk(value):
@@ -222,6 +241,8 @@ def on_screen_strings(slots: dict) -> list[str]:
                     walk(v)
 
     for name, value in slots.items():
+        if name in skip:
+            continue
         if isinstance(value, str):
             # A top-level scalar counts only if the PARAMETER is text-bearing.
             if name in _TEXT_KEYS:
@@ -231,11 +252,11 @@ def on_screen_strings(slots: dict) -> list[str]:
     return out
 
 
-def on_screen_word_count(slots: dict) -> int:
-    return sum(len(words(s)) for s in on_screen_strings(slots))
+def on_screen_word_count(slots: dict, template_name: str = "") -> int:
+    return sum(len(words(s)) for s in on_screen_strings(slots, template_name))
 
 
-def text_element_count(slots: dict) -> int:
+def text_element_count(slots: dict, template_name: str = "") -> int:
     """§9.3's "simultaneous text elements" — one per readable string.
 
     A build template's rows arrive one at a time but they do not leave: at the
@@ -248,7 +269,7 @@ def text_element_count(slots: dict) -> int:
     the maximum across all 11 registered templates to 2, which makes the rule
     unfireable and therefore worthless.
     """
-    return len(on_screen_strings(slots))
+    return len(on_screen_strings(slots, template_name))
 
 
 def count_objects(slots: dict) -> tuple[int, bool]:
@@ -286,7 +307,7 @@ def check_onscreen_text_share(s: SceneView) -> list[Finding]:
     narration word count when the visual channel is occupied."""
     if not s.slots or not s.narration_words:
         return []
-    shown = on_screen_word_count(s.slots)
+    shown = on_screen_word_count(s.slots, s.template_name)
     allowed = int(s.narration_words * ONSCREEN_TEXT_MAX_SHARE)
     if shown <= allowed:
         return []
@@ -315,7 +336,7 @@ def check_verbatim_onscreen(s: SceneView) -> list[Finding]:
     narration_sentences = {_norm(x) for x in sentences(s.narration_text)}
     if not narration_sentences:
         return out
-    for shown in on_screen_strings(s.slots):
+    for shown in on_screen_strings(s.slots, s.template_name):
         n = _norm(shown)
         if not n:
             continue
@@ -357,7 +378,7 @@ def check_text_density(s: SceneView) -> list[Finding]:
     """§9.3: <=25-30 words visible at once, <=3 simultaneous text elements,
     <=6 words per line for emphasis."""
     out: list[Finding] = []
-    strings = on_screen_strings(s.slots)
+    strings = on_screen_strings(s.slots, s.template_name)
     total = sum(len(words(x)) for x in strings)
     if total > MAX_ONSCREEN_WORDS:
         out.append(Finding(
@@ -368,7 +389,7 @@ def check_text_density(s: SceneView) -> list[Finding]:
             threshold={"max_words": MAX_ONSCREEN_WORDS},
             fix="the narration carries the explanation; the screen carries the "
                 "key phrase"))
-    elements = text_element_count(s.slots)
+    elements = text_element_count(s.slots, s.template_name)
     if elements > MAX_TEXT_ELEMENTS:
         out.append(Finding(
             rule="onscreen_text_elements", severity="warning", subject=s.ref,

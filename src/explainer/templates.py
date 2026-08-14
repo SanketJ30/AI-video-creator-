@@ -110,6 +110,13 @@ class Param:
     # For list types: the most items the layout can hold legibly. §9.3 caps
     # simultaneous on-screen objects at 7, and 4 if any carry text.
     max_items: int | None = None
+    # Whether a viewer READS this value, as opposed to it describing what the
+    # shot depicts. `cold_open.premise` and `concept_illustration.subject` are
+    # briefs for the imagery — nothing is typeset from them — so counting them
+    # as on-screen text made §9.4's priority rule fire on scenes with no visible
+    # text at all. Every TEXT param declares this explicitly rather than
+    # defaulting, so the same ambiguity cannot recur silently on a new template.
+    on_screen: bool = True
 
     def to_json(self) -> dict:
         out = {"type": self.type.value, "required": self.required,
@@ -271,9 +278,12 @@ TEMPLATES: dict[str, Template] = {
                         "below a rendered diagram — reach for it when there is "
                         "nothing structural to draw.",
             params=(
-                Param("subject", ParamType.TEXT),
+                Param("subject", ParamType.TEXT, on_screen=False,
+                      description="what the illustration DEPICTS — a brief for "
+                                  "the artwork, never typeset on screen"),
                 Param("asset", ParamType.ASSET_REF, required=False),
-                Param("caption", ParamType.TEXT, required=False),
+                Param("caption", ParamType.TEXT, required=False,
+                      description="the only text a viewer reads on this template"),
             ),
             min_sec=4, max_sec=45, supports_signalling=False),
 
@@ -293,8 +303,9 @@ TEMPLATES: dict[str, Template] = {
                         "stock here specifically: 'a hook at the open, or a "
                         "real-world shot that grounds the problem'.",
             params=(
-                Param("premise", ParamType.TEXT,
-                      description="the situation, not the answer"),
+                Param("premise", ParamType.TEXT, on_screen=False,
+                      description="the situation, not the answer — what the "
+                                  "shot SHOWS, never typeset on screen"),
                 Param("asset", ParamType.ASSET_REF, required=False,
                       description="stock clip; absent means rendered"),
             ),

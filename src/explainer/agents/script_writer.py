@@ -486,7 +486,7 @@ def load(conn, video_id: str) -> list[dict]:
     rows = db.query(conn, """
         select s.ref, s.ordinal, s.gagne_slot, s.narration, s.timing_sensitivity,
                s.pedagogy_meta, s.provenance, s.duration_value, s.duration_rate,
-               o.ref as objective_ref
+               s.visual_spec, o.ref as objective_ref
           from scenes s left join objectives o on o.id = s.objective_id
          where s.video_id = %s order by s.ordinal""", (video_id,))
     for r in rows:

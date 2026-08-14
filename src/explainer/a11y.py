@@ -423,6 +423,11 @@ def lint_accessibility(scenes, palette: dict | None = None) -> A11yReport:
     pedagogy linter does and does not need its own loader.
     """
     findings: list[Finding] = []
+    if not palette:
+        # One note per video, not per scene: "no palette is bound" is a fact
+        # about the video, and repeating it nine times buries the findings a
+        # human can actually act on.
+        findings += check_contrast("video", [], None)
     for s in scenes:
         try:
             t = templates.get(s.template_name)
@@ -434,7 +439,8 @@ def lint_accessibility(scenes, palette: dict | None = None) -> A11yReport:
         findings += check_silent_screen_capture(s.ref, t, s.narration_text)
         findings += check_font_size(s.ref, t, s.visual_spec)
         findings += check_caption_exclusion(s.ref, t, s.visual_spec)
-        findings += check_contrast(s.ref, (s.visual_spec or {}).get("layers"),
-                                   palette)
+        if palette:
+            findings += check_contrast(
+                s.ref, (s.visual_spec or {}).get("layers"), palette)
     return A11yReport(findings=findings, scene_count=len(scenes),
                       unresolved=dict(UNRESOLVED_INPUTS))

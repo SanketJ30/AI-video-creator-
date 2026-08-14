@@ -292,6 +292,8 @@ def test_a_clean_video_reports_only_the_unresolved_contrast_note():
     r = A.lint_accessibility(scenes, palette=None)
     assert r.ok
     assert {f.rule for f in r.findings} == {"contrast_unresolved"}
+    # Once for the video, not once per scene.
+    assert len(r.findings) == 1 and r.findings[0].subject == "video"
 
 
 def test_a_clean_video_with_a_palette_is_completely_clean():
