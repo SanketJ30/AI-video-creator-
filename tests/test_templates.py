@@ -166,3 +166,34 @@ def test_no_parameter_names_a_rendering_construct(name):
 def test_parameter_types_are_all_declared(name):
     for p in templates.get(name).params:
         assert isinstance(p.type, ParamType)
+
+
+# --------------------------------------- D2: on_screen must fail loud, not quiet
+
+def test_a_new_text_parameter_counts_as_on_screen_unless_it_says_otherwise():
+    """D2. The default has to be True: a genuine caption param on a future
+    template must not silently escape §9.4's on-screen-text share. Opting OUT is
+    the deliberate act; opting in is the default."""
+    p = templates.Param("caption", ParamType.TEXT)
+    assert p.on_screen is True
+
+
+def test_exactly_the_two_reviewed_parameters_opt_out():
+    """Every `on_screen=False` is an authored judgement (D2, week4-decisions).
+    If a third appears, it was not reviewed — so this fails and asks for it."""
+    opted_out = {(t.name, p.name) for t in templates.TEMPLATES.values() for p in t.params
+                 if not p.on_screen}
+    assert opted_out == {("cold_open", "premise"),
+                         ("concept_illustration", "subject")}
+
+
+def test_no_asset_or_enum_parameter_needs_the_flag():
+    """asset_ref/enum/int are excluded by TYPE, so setting on_screen on them
+    would be a second mechanism doing the same job — and two mechanisms is how
+    they drift apart."""
+    for t in templates.TEMPLATES.values():
+        for p in t.params:
+            if p.type in (ParamType.ASSET_REF, ParamType.ENUM,
+                          ParamType.INT):
+                assert p.on_screen is True, (
+                    f"{t.name}.{p.name}: excluded by type already")

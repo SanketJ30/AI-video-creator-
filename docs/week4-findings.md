@@ -89,6 +89,33 @@ means "9/9 defensible" is weaker evidence than it reads.
 
 ---
 
+## 2b. ISSUE-8 — the pivotal claim of s04 is stated backwards · BLOCKING
+
+Found by a human reading the script; **no gate in the pipeline can reach it.**
+
+`sp_b735cd9656`: *"Neither transaction writes the row the other one reads."*
+False, and the exact inversion — those two rw-antidependencies **are** write
+skew. The true statement is that neither writes the row the other *writes*.
+It contradicts `sp_1c3727ba32` one line later and `sp_93758ba6db` in s07, and
+the same confusion in s05 (`sp_fb5e4ab259` / `sp_d3de4b56b2`) is why
+`SELECT FOR UPDATE` gets wrongly dismissed.
+
+The linter reports s04 clean on every rule it has, because every §9.6
+deterministic rule is about *form*. §7.2's **Fact Checker** is the agent for
+this and it does not exist. `MODEL_BASED_RULES["factual_confidence"]` reserves
+the slot so the absence is visible in every report.
+
+**Withdrawal on record:** I previously offered the extractor getting Repeatable
+Read right as evidence the Fact Checker might not be load-bearing. Wrong. The
+extractor was right about a fact it was asked to *classify*; the script writer
+was wrong about a fact it was asked to *explain*, in the scene carrying the
+video's thesis, in prose fluent enough to read as authoritative. It is
+load-bearing. Full write-up: ISSUE-8.
+
+Not fixed by hand: the pipeline produced it and the pipeline must catch it.
+
+---
+
 ## 3. s05 — an open reviewable call, not a defect
 
 s05 (`guide`, 52 s) uses `table_build` to lay out four candidate fixes against
@@ -227,6 +254,25 @@ the stricter threshold. Pinned by a test so that cannot happen quietly.
 
 ---
 
+## 8b. Two patterns recorded before week 5
+
+**ISSUE-9 — the speaking-rate overruns are systematic.** Four of nine scenes run
+past their budget (s03, s05, s06, s07) and every one of them is `elastic`, so
+under §11.2 they stretch rather than truncate. Targets sum to 239 s against a
+240 s budget; stretched to fit their words the scenes total **248.4 s, +8.4 s
+over**. The one scene with real slack (s04, −12.9%) is `rigid` and will not give
+it back. Stage 2c prompt issue, not a week 5 timing issue. **Prediction on
+record: v2 finishes long by roughly 8 s before any TTS-rate variance.**
+
+**ISSUE-10 — the retain slot gets 2.5% of the video.** s09 is budgeted 6 s = 15
+words. §9.1 asks that slot for *"summary + spaced-review scheduling hook"* — two
+jobs — and the scene does one. Source is `AUTHORED_TAIL_WEIGHTS` leaving retain
+2.5% after `present` takes 90 s of 239 (37.7%). **Flagged for review, not
+adjusted**: tuning a weight against one video is the n=1 mistake the harness work
+exists to prevent.
+
+---
+
 ## 9. Standing items carried forward
 
 - **ISSUE-3 (MAX_TOKENS, STANDING).** 16000 → 32000 → 64000, three raises for
@@ -240,8 +286,13 @@ the stricter threshold. Pinned by a test so that cannot happen quietly.
   not be reconstructed here.
 - **ISSUE-5 (§9.2 signalling vs 5 non-signalling templates, OPEN).** On v2, 4 of
   9 scenes are exempt from a rule §9.2 states without exceptions.
-- **ISSUE-6 (§9.3 vs table templates, OPEN).** New this week.
-- **ISSUE-7 (per-video term registry, BLOCKING).** New this week.
+- **ISSUE-6 (§9.3 vs table templates).** RESOLVED to count strings; the §9.3
+  amendment question stays open for the PRD.
+- **ISSUE-7 + ISSUE-1 (term registry / recall gate, BLOCKING).** Merged into one
+  piece of work and scheduled at the **front of week 5, before any TTS**.
+- **ISSUE-8 (s04 factual error, BLOCKING).** New. Needs §7.2's Fact Checker.
+- **ISSUE-9 (systematic speaking-rate overrun, MEASURED).** New.
+- **ISSUE-10 (retain slot weighting, OPEN).** New.
 
 ---
 

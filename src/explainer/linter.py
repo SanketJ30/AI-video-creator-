@@ -269,7 +269,6 @@ def on_screen_word_count(slots: dict, template_name: str = "") -> int:
 def text_element_count(slots: dict, template_name: str = "") -> int:
     """§9.3's "simultaneous text elements" — one per readable string.
 
-    PROVISIONAL(D1) — see docs/week4-decisions-needed.md. Strings vs slots is a
     spec question (ISSUE-6), not a settled reading.
 
     A build template's rows arrive one at a time but they do not leave: at the
@@ -569,12 +568,49 @@ def check_video_duration(scenes: list[SceneView]) -> list[Finding]:
     return out
 
 
+def longest_template_run(scenes: list[SceneView]) -> tuple[int, str]:
+    """The longest run of CONSECUTIVE identical templates, and which template.
+
+    Reported as a bare number with no threshold attached, deliberately. Share
+    and run length measure different failures and neither substitutes for the
+    other: 4 of 9 scenes spread across a video is variety, the same 4 back to
+    back is monotony, and the share metric cannot tell them apart. On video v2
+    the share is 44% (arguably fine) while the run is 3 (s05-s07, all
+    `table_build`) — which is the one a viewer would actually notice.
+
+    No number is invented here because v0.2 gives none and old-PRD §13.5's "no
+    more than 2 consecutive" is superseded (ISSUE-4). The count is surfaced and
+    a human decides.
+    """
+    best_n, best_name = 0, ""
+    run_n, run_name = 0, ""
+    for s in scenes:
+        if s.template_name and s.template_name == run_name:
+            run_n += 1
+        else:
+            run_name, run_n = s.template_name, 1 if s.template_name else 0
+        if run_n > best_n:
+            best_n, best_name = run_n, run_name
+    return best_n, best_name
+
+
+def _distribution(scenes: list[SceneView]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for s in scenes:
+        if s.template_name:
+            counts[s.template_name] = counts.get(s.template_name, 0) + 1
+    return counts
+
+
 def check_template_variety(scenes: list[SceneView]) -> list[Finding]:
     """AUTHORED AND UNREVIEWED — see the table above and ISSUE-4.
 
     v0.2 has no variety budget. This reports the distribution and flags a
     template that dominates. Warning only. The number is arguable and is printed
     in every finding so it can be argued with.
+
+    The consecutive-run length travels with the finding but never fires one —
+    see `longest_template_run`.
     """
     if not scenes:
         return []
@@ -597,7 +633,9 @@ def check_template_variety(scenes: list[SceneView]) -> list[Finding]:
                         f"AUTHORED AND UNREVIEWED — v0.2 has no variety budget "
                         f"(ISSUE-4).",
                 measured={"template": name, "scenes": n, "of": total,
-                          "share": round(share, 4), "distribution": counts},
+                          "share": round(share, 4), "distribution": counts,
+                          "longest_consecutive_run": longest_template_run(
+                              scenes)[0]},
                 threshold={"max_share": AUTHORED_TEMPLATE_SHARE_MAX,
                            "authored": True, "spec_source": None},
                 fix="vary the treatment, or restore a variety budget to the PRD"))
@@ -633,6 +671,11 @@ class LintReport:
     findings: list[Finding]
     scene_count: int = 0
     not_implemented: dict = field(default_factory=dict)
+    # Bare measurements with no threshold attached. They are NOT findings: a
+    # number nobody has set a limit for cannot pass or fail, and putting it in
+    # `findings` would either invent a threshold or make every clean video
+    # report something. The CLI prints them so they are seen either way.
+    stats: dict = field(default_factory=dict)
 
     @property
     def blocking(self) -> list[Finding]:
@@ -697,8 +740,14 @@ def lint(scenes: list[SceneView]) -> LintReport:
             vocab_seen = True
     findings += check_video_duration(scenes)
     findings += check_template_variety(scenes)
-    return LintReport(findings=findings, scene_count=len(scenes),
-                      not_implemented={**MODEL_BASED_RULES, **DEFERRED_RULES})
+    run_n, run_name = longest_template_run(scenes)
+    return LintReport(
+        findings=findings, scene_count=len(scenes),
+        not_implemented={**MODEL_BASED_RULES, **DEFERRED_RULES},
+        stats={"longest_consecutive_template_run": run_n,
+               "longest_run_template": run_name,
+               "template_distribution": _distribution(scenes),
+               "target_seconds_total": sum(s.seconds for s in scenes)})
 
 
 # ------------------------------------------------------------ persistence

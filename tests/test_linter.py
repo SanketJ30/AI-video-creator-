@@ -370,3 +370,45 @@ def test_every_spec_constant_is_either_enforced_or_named_as_not_enforced():
 def test_the_words_per_line_rule_is_declared_unenforced():
     assert "words_per_line" in L.DEFERRED_RULES
     assert str(L.MAX_WORDS_PER_LINE) == "6"
+
+
+# ------------------------------------ D3: run length, a bare number
+
+def test_the_longest_consecutive_run_is_counted():
+    """D3: 4 of 9 spread out is variety; the same 4 back to back is monotony,
+    and the share metric cannot tell them apart."""
+    spread = [scene("s1", template="a"), scene("s2", template="b"),
+              scene("s3", template="a"), scene("s4", template="b")]
+    run = [scene("s1", template="a"), scene("s2", template="a"),
+           scene("s3", template="a"), scene("s4", template="b")]
+    assert L.longest_template_run(spread) == (1, "a")
+    assert L.longest_template_run(run) == (3, "a")
+
+
+def test_the_run_is_a_stat_not_a_finding():
+    """No threshold exists for it, so it cannot pass or fail. Putting it in
+    findings would either invent a limit or make every clean video report
+    something."""
+    scenes = [scene(f"s{i}", template="table_build") for i in range(4)]
+    report = L.lint(scenes)
+    assert report.stats["longest_consecutive_template_run"] == 4
+    assert "run" not in {f.rule for f in report.findings}
+
+
+def test_the_run_travels_with_the_variety_finding_too():
+    scenes = [scene(f"s{i}", template="table_build") for i in range(4)]
+    variety = [f for f in L.check_template_variety(scenes)
+               if f.rule == "template_variety"]
+    assert variety[0].measured["longest_consecutive_run"] == 4
+
+
+def test_an_empty_video_has_no_run():
+    assert L.longest_template_run([]) == (0, "")
+
+
+def test_scenes_with_no_template_do_not_form_a_run():
+    """A missing visual_spec is check_multimedia's problem; it must not read as
+    'three consecutive identical templates'."""
+    blank = [L.SceneView(ref=f"s{i}", gagne_slot="present", narration_text=NARR,
+                         visual_spec={}) for i in range(3)]
+    assert L.longest_template_run(blank) == (0, "")

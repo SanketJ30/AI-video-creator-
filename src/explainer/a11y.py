@@ -169,9 +169,6 @@ def flash_windows(luminance: list[float], area_fraction: list[float],
                   threshold: float = 0.10) -> list[FlashWindow]:
     """§16.2 2.3.1: sliding 1 s window, fail >3 transitions/s over >25% of frame.
 
-    PROVISIONAL(D5) — `threshold` is PEAT's number, not v0.2's. See
-    docs/week4-decisions-needed.md.
-
     `luminance` is mean relative luminance per frame and `area_fraction` is the
     fraction of the frame that changed in that frame — both of which only a
     renderer can produce. `threshold` is the luminance delta that counts as a
@@ -262,7 +259,6 @@ def check_contrast(scene_ref: str, layers: list[dict] | None,
                    palette: dict | None) -> list[Finding]:
     """§16.2 1.4.3 / 1.4.11.
 
-    PROVISIONAL(D6) — reporting `unresolved` at info rather than staying
     silent. See docs/week4-decisions-needed.md.
 
     `layers` is [{name, colour, background, pt, bold, non_text}]. When no

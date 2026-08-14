@@ -1061,6 +1061,24 @@ def _render_lint(report) -> str:
                 lines.append(f"        fix: {f.fix}")
     if not report.findings:
         lines.append(err("no findings", fg=typer.colors.GREEN))
+    stats = getattr(report, "stats", None)
+    if stats:
+        # Bare numbers, no threshold. Share and run length measure different
+        # failures: 4 of 9 spread out is variety, 4 back to back is monotony.
+        lines.append("")
+        lines.append(err("MEASURED, NO THRESHOLD SET (v0.2 gives none):",
+                         fg=typer.colors.BRIGHT_BLACK))
+        run = stats.get("longest_consecutive_template_run")
+        lines.append(err(
+            f"  longest consecutive run of one template: {run}"
+            f"{' (' + stats['longest_run_template'] + ')' if run else ''}",
+            fg=typer.colors.BRIGHT_BLACK))
+        lines.append(err(f"  template distribution: "
+                         f"{_kv(stats.get('template_distribution') or {})}",
+                         fg=typer.colors.BRIGHT_BLACK))
+        lines.append(err(f"  target seconds total: "
+                         f"{stats.get('target_seconds_total')}",
+                         fg=typer.colors.BRIGHT_BLACK))
     lines.append("")
     lines.append(err("NOT CHECKED (so 'no finding' here is not 'passes'):",
                      fg=typer.colors.BRIGHT_BLACK))

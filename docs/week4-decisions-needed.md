@@ -1,5 +1,9 @@
 # Week 4 — decisions needed
 
+> **ALL SIX RESOLVED 15 Aug 2026.** Kept as the record of what was asked and
+> what was decided. Resolutions are marked inline; the `PROVISIONAL(...)` marks
+> have been removed from the code.
+
 Written during the unattended run. Each entry is a question I would normally
 have stopped to ask. For each: the options, my recommendation, what I actually
 did, and where the choice is marked `PROVISIONAL` in the code.
@@ -37,6 +41,9 @@ report by making the rule mean nothing, which is the worse failure.
 
 **Chosen: 1.** Warning, never blocking.
 
+
+> **RESOLVED: count strings** (option 1), as recommended. The §9.3 amendment question goes to the PRD; no row-count allowance invented here. See ISSUE-6.
+
 ---
 
 ## D2 — Are `premise` and `subject` on-screen text?
@@ -68,6 +75,9 @@ false.**
 
 Worth a human eye because it changes what the headline §9.4 number means.
 
+
+> **RESOLVED: accepted**, with one addition — `on_screen` defaults to **True**, so a genuine caption param on a future template cannot silently escape §9.4. Opting out is the deliberate act. Guarded by three tests in `test_templates.py`.
+
 ---
 
 ## D3 — What share of a video may one template carry?
@@ -83,6 +93,9 @@ not reconstruct §13.5 myself. That is what is implemented.
 4 of 9). A different number between 0.34 and 0.44 changes whether v2 is flagged
 at all. Warning-only, never blocking.
 
+
+> **RESOLVED: keep 0.40, still unreviewed**, plus a second metric that needs no threshold — the longest run of CONSECUTIVE identical templates, reported as a bare number. Share and run length measure different failures. v2: share 44%, run 3 (s05-s07, all `table_build`).
+
 ---
 
 ## D4 — Should video-level rules run on a single scene?
@@ -96,6 +109,9 @@ which made a "clean scene" unit test impossible to write honestly. Split into
 `scene_findings(scene)` and `lint(scenes)`; the video-level rules run only in
 `lint`. Recorded here because it changes what `lint` means on a partial video,
 not because I think it is wrong.
+
+
+> **RESOLVED: agreed, no action.**
 
 ---
 
@@ -112,6 +128,9 @@ chose — but it is not in v0.2 either, so it is listed.
 criterion is implemented and tested against synthetic sequences: 3 transitions
 pass, 4 fail, a small-area flash does not count, a shimmer between two
 near-whites does not count.
+
+
+> **RESOLVED: accepted.** PEAT's 0.10 is a sourced standard, not an invented number — that distinction is the one that matters. Still unvalidatable until week 5 produces frames.
 
 ---
 
@@ -133,6 +152,9 @@ and v0.2 names no colours.
    produce a compliance number about colours nobody chose.
 
 **Chosen: 1.** Phase 5 owns brand; this becomes a real check then.
+
+
+> **RESOLVED: accepted, option 1.** Silence on a WCAG gate reading as compliance is the worse failure.
 
 ---
 

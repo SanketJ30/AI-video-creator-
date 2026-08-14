@@ -222,7 +222,17 @@ is worthless.
 3. **The cap stands and the warning is correct** — current behaviour: every
    table and terminal scene carries a §9.3 warning a human dismisses.
 
-**Current behaviour, pending that decision:** option 3. Warning, never blocking.
+**RESOLVED 15 Aug 2026 — option 3 (count strings), by human decision.** The
+reasoning accepted: a completed `table_build` has all its cells on screen
+together, which is what "simultaneous" measures, and counting slots makes the
+rule dead code. Warning, never blocking.
+
+**Still open for the PRD, and explicitly NOT to be invented here:** whether §9.3
+should distinguish independent text elements from the rows of one structured
+element, and if so what row-count allowance a build template gets. Until v0.2
+answers that, every table and terminal scene carries a warning a human dismisses.
+
+**Current behaviour:** option 3. Warning, never blocking.
 On video v2 this fires on the 4 `table_build` scenes noted in the week-4
 findings, so it compounds with the template-variety flag on the same scenes.
 
@@ -266,3 +276,165 @@ already-known appears in a previous video's `new_terms`".
 
 **Not fixed in week 4** on the same reasoning as ISSUE-1: it is a Stage 2c
 defect and week 4 is Stage 2d. Logged, not chased.
+
+**MERGED WITH ISSUE-1, 15 Aug 2026, and scheduled.** These are one piece of work,
+not two: the per-course term registry is simultaneously the `new_terms` fix and
+the set the recall-slot gate tests membership against. Both are blocking, both
+sit on Wedge A — *"video 6 correctly assumes what video 2 taught"* — which is the
+product's first wedge, so the pair goes at the **front of week 5, before any TTS
+work**. Tracked as week 5 step 0.
+
+---
+
+## ISSUE-8 — s04 states the pivotal claim of the video backwards · BLOCKING
+
+**Found by a human reading the script. Nothing in the pipeline can catch it, and
+that is the finding.**
+
+`mvcc-write-skew` v2, scene s04 (`present`, the 90s scene the whole video turns
+on):
+
+```
+sp_b735cd9656  "Neither transaction writes the row the other one reads."
+```
+
+**False, and it is the exact inversion of the anomaly.** A writes A's row, which
+B read; B writes B's row, which A read. Those two rw-antidependencies *are* write
+skew — they are the thing SSI detects. The true statement is that neither
+transaction writes the row the other **writes**: the absence of a write-write
+collision is why Repeatable Read has nothing to catch.
+
+The script gets that right one line later and does not notice the contradiction:
+
+```
+sp_1c3727ba32  "Repeatable Read watches for two transactions writing the same row"
+```
+
+**It also contradicts s07.** `sp_93758ba6db` says SERIALIZABLE "tracks what each
+transaction reads, not just writes, and aborts one" — but if neither transaction
+wrote what the other read, there would be no antidependency for SSI to find and
+nothing to abort.
+
+**The same confusion recurs in s05 and changes a recommendation:**
+
+```
+sp_fb5e4ab259  "But neither doctor's query updates the row it reads"
+sp_d3de4b56b2  "each reads the whole list and writes only its own row."
+```
+
+Each transaction *does* update a row it read — its own row is in the list it
+read. This is why `SELECT FOR UPDATE` gets dismissed at `sp_b66b284d03`, and the
+dismissal is wrong: applied to the full read set it would in fact serialise the
+two transactions and prevent the anomaly.
+
+### Why no existing gate catches it
+
+Every §9.6 deterministic rule is about *form* — word counts, element counts,
+readability, cue anchoring. None reads the claim. The linter reports s04 clean on
+every rule it has. The prose is excellent (`sp_6075dc41f2`, "It's a fact about
+the relationship between rows", is the best line in the video). **The prose is
+not the problem; one claim inside it is**, and that is precisely the class of
+defect deterministic linting cannot reach.
+
+### The named gap
+
+§7.2 Tier 2 specifies **Fact Checker** — *"claims extracted, each independently
+verified with sources, confidence scored. Anything below threshold gets flagged
+in the UI, never silently kept."* It does not exist. `linter.MODEL_BASED_RULES`
+already reserves `factual_confidence` for it, so the absence is visible in every
+report, but nothing fills it.
+
+*(Naming: v0.2 §7.2 calls this agent the Fact Checker. It has been referred to in
+conversation as the "Fact Challenger" — same agent, and the spec's name is used
+in code.)*
+
+**WITHDRAWN:** I previously offered the objective extractor getting Repeatable
+Read's semantics right as evidence that the Fact Checker might not be
+load-bearing. That was wrong and this withdraws it. The extractor was correct
+about a fact it was asked to classify; the script writer was wrong about a fact
+it was asked to *explain*, in the one scene that carries the video's thesis, in
+prose fluent enough that it reads as authoritative. Those are different jobs and
+only the second is what §7.2's Fact Checker is for. **It is load-bearing.**
+
+**Not fixed by hand, deliberately.** The pipeline produced this and the pipeline
+must catch it. Editing the narration would remove the only real specimen we have
+of the defect class the Fact Checker exists to find.
+
+---
+
+## ISSUE-9 — speaking-rate overruns are systematic, and the video will run over · MEASURED
+
+Four of nine scenes exceed their speaking-rate budget on v2. Warnings, none
+blocking, but the direction is one-sided — which is what makes it a Stage 2c
+prompt issue rather than noise.
+
+Measured at 160 wpm from the stored narration:
+
+| scene | slot | words | target | needs | over |
+|---|---|---:|---:|---:|---:|
+| s01 | hook | 39 | 15 | 14.6 | −2.5% |
+| s02 | objective | 14 | 10 | 5.2 | −47.5% |
+| **s03** | **recall** | **57** | **20** | **21.4** | **+6.9%** |
+| s04 | present | 209 | 90 | 78.4 | −12.9% |
+| **s05** | **guide** | **147** | **52** | **55.1** | **+6.0%** |
+| **s06** | **elicit** | **52** | **17** | **19.5** | **+14.7%** |
+| **s07** | **feedback** | **57** | **19** | **21.4** | **+12.5%** |
+| s08 | assess | 25 | 10 | 9.4 | −6.2% |
+| s09 | retain | 15 | 6 | 5.6 | −6.2% |
+
+**The arithmetic that matters:**
+
+```
+targets sum                                    239 s
+brief budget                                   240 s   (1 s of slack)
+elastic scenes stretched to fit their words    248.4 s
+                                               ------
+over budget                                    +8.4 s
+```
+
+Every over-budget scene is `elastic`, so under §11.2's resolver they stretch to
+fit the audio rather than truncating it. The 1 s of slack cannot absorb 8.4 s.
+The only under-running scene with real room is s04 (`present`, −12.9%) and it is
+**rigid**, so it will not give its time back.
+
+**This is Stage 2c, not week 5.** The timing resolver will report the overrun
+correctly; it is the script writer that is writing past its budget. Logged with
+the arithmetic so the week-5 runtime can be checked against a prediction made
+before TTS rather than explained after it.
+
+**Prediction on record: the finished v2 runs long, by roughly 8 s, before any
+TTS-rate variance.**
+
+---
+
+## ISSUE-10 — the retain slot gets 2.5% of the video and §9.1 asks it to do two jobs · OPEN
+
+s09 (`retain`) is budgeted **6 seconds**. §9.1 defines that slot as *"summary +
+spaced-review scheduling hook"* — two jobs. Six seconds is 15 words at 160 wpm.
+The scene the pipeline produced does one of them:
+
+```
+sp_8f3f52a97d  "Before you move on, say aloud how you'd spot write skew and pick its fix."
+```
+
+That is a retrieval prompt. There is no spaced-review scheduling hook, and there
+is no room for one.
+
+**Where the 6 seconds comes from.** `gagne.AUTHORED_TAIL_WEIGHTS` distributes
+whatever is left after §9.1's capped slots. On v2:
+
+```
+present   90 s of 239   37.7%     (AUTHORED_PRESENT_SECONDS, rigid)
+retain     6 s of 239    2.5%
+```
+
+**Flagged for review, not adjusted.** `AUTHORED_TAIL_WEIGHTS` is already marked
+AUTHORED AND UNREVIEWED, and changing a weight to make one scene look better
+would be tuning against a single video — the same n=1 mistake the week-2 harness
+work was done to stop. The question for a human is whether §9.1's retain slot can
+do both its jobs at any weighting that leaves `present` enough room, or whether
+the spaced-review hook belongs outside the video entirely (§9.5 schedules
+retrieval at the *course* level, which may be the real answer).
+
+Note this interacts with ISSUE-9: retain is one of the scenes that fits, so
+taking time from it to pay for the overruns is not available.
