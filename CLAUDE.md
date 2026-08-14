@@ -9,9 +9,17 @@ Output: a branded, narrated, pedagogically sequenced 1080p MP4, editable at
 **beat granularity**, produced inside a stated cost, latency and
 **human-attention** budget.
 
-The spec is `docs/prd/PRD_v4.md`. It is the source of truth. When this file and
-the PRD disagree, the PRD wins — tell me about the disagreement rather than
-silently picking one.
+The spec is `docs/prd/Sequence_v0.2.md` — the **anchor document**, and the only
+one section references point at. `docs/prd/CHALLENGES.md` sits beside it and
+carries the ten irreversible decisions (R1–R8) that migration 0002 encodes.
+When this file and Sequence v0.2 disagree, the PRD wins — tell me about the
+disagreement rather than silently picking one.
+
+`docs/prd/PRD_v4.md` is **historical**: the superseded Board Infinity PRD. Its
+section numbering is different and does not line up with v0.2 — §9.1 is "the
+four levers" there and "the Gagné scaffold" here, §5.1 is the artifact model
+there and the Scene object here. Read it for background on the invalidation
+model only. Never resolve a `§x.y` reference against it.
 
 The differentiator (PRD §1.1): a *pedagogically sequenced series* where video 6
 correctly assumes what video 2 taught, that gets cheaper and better with every
@@ -112,7 +120,9 @@ this. Don't try to make it one pass.
 ```
 migrations/0001_init.sql     §6.3 schema. Add new files, never edit applied ones.
 prompts/<name>.v<N>.md       Versioned prompts. Bump the filename to bump the version.
-docs/prd/PRD_v4.md           The spec.
+docs/prd/Sequence_v0.2.md    THE SPEC. All §x.y references resolve here.
+docs/prd/CHALLENGES.md       R1–R8, the irreversible decisions.
+docs/prd/PRD_v4.md           Historical. Different numbering — do not cite it.
 src/explainer/
   config.py                  Settings + pinned model ids. hashable_config() is the
                              subset that may enter a closure.
