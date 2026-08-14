@@ -414,3 +414,74 @@ runs:
       The topic: line describes the course; max_videos describes one video; they
       now pull against each other. Flagged for Sanket — this is a gold/brief
       design question, not something to fix by iterating the prompt.
+
+  # ---------------------------------------------------------------------------
+  # DRAFTED BY CLAUDE CODE, 14 Aug 2026 — NOT reviewed by a human.
+  #
+  # READ THE VERDICT ON THIS ENTRY BEFORE TRUSTING ANY EARLIER ONE. Two samples
+  # of this exact configuration disagree more than any two configurations in
+  # this file do, which means every single-run comparison recorded above —
+  # including my own "the brief edit closed the gap" diagnosis — cannot be
+  # distinguished from sampling noise.
+  # ---------------------------------------------------------------------------
+  - run: v3-run4
+    prompt_version: objective_extractor@v3
+    brief_version: 4
+    model: claude-opus-5 (MODEL_FRONTIER as pinned 14 Aug 2026)
+    extracted_count: 5
+    samples: 2
+    note: >-
+      Gold v4 dropped "and how SSI closes the gap" from topic:, on the
+      hypothesis that naming out-of-scope content in the topic was starving the
+      in-scope anomaly criterion under max_videos=1. TWO samples were taken of
+      the resulting configuration, and they do not agree:
+
+        sample 1: dirty read YES, non-repeatable read YES, phantom read NO,
+                  SSI (acronym) no, SERIALIZABLE YES, taught blooms apply/apply
+        sample 2: dirty read NO,  non-repeatable read NO,  phantom read NO,
+                  SSI no, SERIALIZABLE no, taught blooms apply/apply
+
+      Same brief, same prompt, same model, same pin. The coverage of gold o2's
+      criterion moved from 2/3 anomaly names to 0/3 between two draws.
+
+    coverage:
+      o1:
+        extracted: [o1]
+        verdict: covered_but_reframed
+        comment: >-
+          Stable across all five recorded runs: gold o1 is snapshot isolation
+          marked assumed, extracted o1 teaches the same mechanism as a taught
+          objective. This is the one judgment in the file I would defend at n=1,
+          because it has not varied.
+
+      o2:
+        extracted: [o2]
+        verdict: partial
+        comment: >-
+          UNSURE and now unstable. Sample 2 — the stored graph — diagnoses write
+          skew and distinguishes it from the same-row conflict, but names none
+          of the three anomalies gold o2's criterion demands. Sample 1 named
+          two. v3-run2 named all three. Bloom is apply in both samples against
+          gold's analyze.
+
+      o4:
+        extracted: []
+        verdict: excluded_by_scope
+        comment: >-
+          Unchanged and not counted: in_milestone_a false, max_videos 1,
+          declared in out_of_scope.
+
+    unmapped_extracted: [o3, o4, o5]
+    verdict: >-
+      The predicted result did not occur, and the reason is not the topic line.
+      SSI-the-acronym dropped but SERIALIZABLE persisted in sample 1 and
+      vanished in sample 2; phantom read was absent from both. Between-sample
+      variance at a fixed configuration exceeds between-configuration difference
+      at n=1, so no attribution in this file above — v1 vs v2 granularity, the
+      v3-run2 brief edit, the v3-run3 SSI contention — is safe on the evidence
+      recorded. The granularity finding (10 objectives -> 2) is the exception:
+      that reproduced across two runs at the time and is a large enough effect
+      to survive.
+      What this file needs before it can act as the §14.4 regression harness is
+      several samples per configuration and a stated pass criterion, not one
+      draw per prompt version. Flagged for Sanket.

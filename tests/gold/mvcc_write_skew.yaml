@@ -37,11 +37,28 @@
 #   constructive alignment against an analyze-level objective, so it has been
 #   replaced with an analyze-level item. THAT REPLACEMENT IS NOT REVIEWED — see
 #   the note on a1 below.
+#
+# v4 (14 Aug): the clause "and how SSI closes the gap" REMOVED from topic:.
+#
+#   Why: the v3 amendment above widened topic: to imply the whole graph, and the
+#   whole graph includes o4, which this file marks in_milestone_a: false. So the
+#   topic line advertised content the graph itself puts out of scope. Under
+#   max_videos: 1 that created direct contention — v3-run3's extractor spent its
+#   single analyze-level criterion on SSI and dropped the three anomaly names
+#   that v3-run2 had produced. topic: describes the course; max_videos describes
+#   one video; with SSI named in the topic they pulled against each other and
+#   the extractor resolved it toward the last clause.
+#
+#   This is a correction to the v3 amendment, not to the extractor. The
+#   back-and-forth is kept in full rather than tidied into a final state: v2
+#   fixed o4's wording, v3 merged o2/o3 and over-widened the topic, v4 narrows
+#   the topic back. Anyone reading this file later should be able to see that
+#   the topic line has been the load-bearing field twice.
 
 topic: >-
   MVCC and the write skew anomaly under Repeatable Read isolation in PostgreSQL —
-  how snapshots decide what a transaction reads, which concurrency anomalies
-  Repeatable Read prevents and which it does not, and how SSI closes the gap
+  how snapshots decide what a transaction reads, and which concurrency anomalies
+  Repeatable Read prevents and which it does not
 engine: postgresql            # o2/o4 are engine-specific — see notes below
 
 audience:
