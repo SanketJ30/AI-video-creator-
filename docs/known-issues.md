@@ -114,3 +114,68 @@ Sonnet 5's output limit and a nine-slot script is a few thousand tokens of
 narration. If it overruns again, the thing to examine is `output_config.effort`
 — currently `high` on every agent — not `MAX_TOKENS`. Raising the ceiling a
 fourth time would be treating the symptom.
+
+---
+
+## ISSUE-4 — v0.2 has no transition grammar or variety budget · SPEC GAP
+
+**Missing from:** Sequence v0.2. **Present in:** PRD_v4 §13.5, which v0.2
+supersedes.
+
+PRD_v4 §13.5 stated both halves concretely:
+
+> - Every scene node declares its transition to the next: `hard_cut` |
+>   `cross_dissolve` | `match_cut{shared_element}` | `wipe_reveal`.
+> - **Variety budget:** the same template may not fire more than **2 times
+>   consecutively**; the agent must substitute or justify, and a justification
+>   surfaces as a Gate B flag.
+> - `match_cut` requires both scenes to share a registered element.
+
+Neither appears anywhere in v0.2. Grep confirms: no `transition grammar`, no
+`variety budget`, no consecutive-template rule. The `transitions` table exists in
+migration 0002 with a `kind` column defaulting to `cut`, so the data model kept
+what the spec dropped.
+
+**Why it matters now.** Video v2's first visual plan put `table_build` on 4 of 9
+scenes, including three consecutive (s05, s06, s07). Under PRD_v4's rule that
+would have flagged. Under v0.2 nothing flags, because there is no rule. Every
+individual choice was defensible; the sequence is monotonous.
+
+**Not reconstructed here, deliberately.** Restoring §13.5's numbers into code
+would make a superseded PRD's decisions into current behaviour by the back door,
+and the "2 consecutive" figure is exactly the sort of thing that should be
+re-decided rather than inherited. **This needs to come back into Sequence v0.2 as
+spec.**
+
+**What week 4 does in the meantime:** the linter reports the distribution of
+templates across a video and flags any template exceeding a share threshold. That
+threshold is AUTHORED AND UNREVIEWED and sits in the same marked table as the
+duration bands. It is a warning with a visible number to argue with — not a rule,
+and explicitly not §13.5.
+
+---
+
+## ISSUE-5 — §9.2 requires signalling in every scene; five templates cannot host it · OPEN
+
+**Tension between:** §9.2 Signalling — *"Every scene contains 1–3 signalling
+events. Never zero, never more than 3 concurrent"* — and `templates.py`, where
+`key_phrase`, `term_card`, `concept_illustration`, `title_card` and `cold_open`
+declare `supports_signalling = False`.
+
+**The flag is mine, not the spec's.** §9.2 states the 1–3 rule and the permitted
+signal types; nothing in v0.2 says a template may decline to host one. I set
+those five to False on the judgement that a single typeset phrase has nothing to
+point *at*, which is defensible but is an authored decision creating a conflict
+with a stated rule.
+
+Two ways out, and it is a spec question rather than a code one:
+
+1. **Every template must host signalling** — flip all five to True and let the
+   signal designer find something to highlight, satisfying §9.2 literally.
+2. **§9.2's rule applies only to templates that can host a cue** — the current
+   behaviour, which means "never zero" is not literally true.
+
+**Current behaviour, pending that decision:** scenes on a signalling-capable
+template must carry 1–3 cues, enforced as blocking. Scenes on the other five
+carry zero and are not flagged. On video v2 that means 4 of 9 scenes are exempt
+from a rule §9.2 states without exceptions.
