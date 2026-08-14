@@ -80,6 +80,28 @@ class AssemblyError(RuntimeError):
     pass
 
 
+def _assert_audible(path: Path) -> None:
+    """A muxed scene whose audio is digital silence is a broken scene.
+
+    This exists because it happened: the first full render produced a correct
+    1080p file at -91 dB throughout, and nothing in the pipeline noticed. Every
+    duration, hash, caption and frame count was right. The check is cheap and it
+    is the difference between shipping a video and shipping a silent one.
+    """
+    p = subprocess.run([ffmpeg_exe(), "-hide_banner", "-i", str(path),
+                        "-af", "volumedetect", "-f", "null", "-"],
+                       capture_output=True, text=True)
+    for line in (p.stderr or "").splitlines():
+        if "max_volume:" in line:
+            db = float(line.split("max_volume:")[1].replace("dB", "").strip())
+            if db < -60.0:
+                raise AssemblyError(
+                    f"{path.name}: muxed audio peaks at {db} dB — that is "
+                    f"silence. The narration did not reach the file.")
+            return
+    raise AssemblyError(f"could not measure audio level of {path}")
+
+
 def _run(cmd: list[str], what: str) -> None:
     p = subprocess.run(cmd, capture_output=True)
     if p.returncode != 0:
@@ -129,7 +151,11 @@ def mux_scene(video_hash: str, audio_hash: str, frames: int,
         kind="mux_scene", upstream={"video": video_hash, "audio": audio_hash},
         prompt_version=None, model_version=None, code_version=None,
         config={"ffmpeg": ffmpeg_version(), "fps": rtime.FPS,
-                "sample_rate": rtime.SAMPLE_RATE},
+                "sample_rate": rtime.SAMPLE_RATE,
+                # In the closure because it changes which audio ends up in the
+                # file. Without it, muxes made before the explicit -map was
+                # added would be served from cache and stay silent.
+                "stream_map": "0:v:0+1:a:0"},
         extra={"frames": int(frames), "samples": int(audio_samples_target)})
     st = store()
     if st.exists(h):
@@ -154,11 +180,18 @@ def mux_scene(video_hash: str, audio_hash: str, frames: int,
               "-i", str(vin),
               "-f", "s16le", "-ar", str(rtime.SAMPLE_RATE), "-ac", "1",
               "-i", str(ain),
+              # EXPLICIT stream mapping, and it is load-bearing. Remotion's
+              # ProRes output already carries a SILENT stereo PCM track, and
+              # ffmpeg's default audio selection prefers more channels — so it
+              # picked Remotion's silence over this mono narration and produced
+              # a video at -91 dB. Measured, not theorised.
+              "-map", "0:v:0", "-map", "1:a:0",
               "-c:v", "copy",
               # PCM keeps the intermediate lossless (§11.4).
               "-c:a", "pcm_s16le",
               "-shortest", str(out)], "mux")
         data = out.read_bytes()
+        _assert_audible(out)
     st.put(h, data, mime="video/mov")
     return h
 

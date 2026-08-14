@@ -535,3 +535,57 @@ it is visible rather than silently different from its neighbours.
 
 **Do not "fix" this by relaxing the alignment check.** The check is what caught
 it.
+
+---
+
+## ISSUE-12 — the first full render produced a technically perfect SILENT video · FIXED
+
+The first end-to-end run of `explainer render mvcc-write-skew v2` produced a
+1920×1080, 30 fps, 3:39.07 MP4 with 48 kHz AAC audio, correct captions, a
+correct word sidecar, and a runtime matching the resolved timeline to the
+hundredth of a second.
+
+**Every sample of its audio was digital silence.** `volumedetect` reported
+`mean_volume: -91.0 dB, max_volume: -91.0 dB`.
+
+### Why nothing caught it
+
+Every check in the pipeline passed, and each one was right:
+
+- durations resolved and frame-aligned — correct
+- content hashes stable, cache hits clean — correct
+- 46 caption cues ending at 219.06 s against a 219.07 s timeline — correct
+- the render was byte-identical across two runs — correct
+- `probe_duration` matched the resolver exactly — correct
+
+The pipeline verified **structure** thoroughly and **signal** not at all.
+
+### Root cause
+
+Remotion's ProRes output already contains a **silent stereo PCM audio track**.
+`mux_scene` passed the ProRes as input 0 and the narration PCM as input 1 with
+no explicit `-map`. ffmpeg's default audio stream selection prefers the stream
+with more channels, so it chose Remotion's silent **stereo** track over the
+narration's **mono** one — and did so without warning, because picking a valid
+audio stream is exactly what it is supposed to do.
+
+### Fix
+
+Explicit `-map 0:v:0 -map 1:a:0`, plus `_assert_audible()` after every mux,
+which fails the build when a muxed scene peaks below −60 dB.
+
+`"stream_map"` is now part of the mux closure. Without that, every mux made
+before the fix would have been served from cache and stayed silent — the fix
+would have appeared to do nothing, which is a worse failure than the original.
+
+Measured after the fix, single scene s09: `mean_volume -18.7 dB, max_volume
+-0.5 dB`.
+
+### The lesson worth keeping
+
+A content-addressed pipeline verifies that outputs are *reproducible*, not that
+they are *right*. Determinism said the silence was perfectly reproducible
+silence. **Add a signal check at every boundary where a stream can be dropped**,
+not only a structural one — and note that this is the same shape as ISSUE-8,
+where the prose was fluent and the claim was false. Both are cases of a check
+that measures form passing something wrong in substance.

@@ -172,3 +172,43 @@ def test_the_final_encode_is_a_single_pass_with_pinned_params():
     assert p["video"] == "libx264" and p["crf"] == "18"
     assert p["fps"] == 30 and p["sample_rate"] == 48000
     assert "ffmpeg" in p, "§11.3: codec version is part of the cache key"
+
+
+# ------------------------------------------------- ISSUE-12: signal, not form
+
+def test_the_stream_map_is_part_of_the_mux_closure():
+    """ISSUE-12. Without it, muxes made before the explicit -map was added stay
+    cached and stay silent — the fix would appear to do nothing, which is worse
+    than the original bug."""
+    import inspect
+    src = inspect.getsource(assembly.mux_scene)
+    assert '"stream_map"' in src
+    assert '"-map", "0:v:0"' in src and '"-map", "1:a:0"' in src
+
+
+def test_a_silent_mux_is_rejected(tmp_path):
+    """ISSUE-12: the first full render was a technically perfect silent video.
+    Every structural check passed. This is the one that would have caught it."""
+    import subprocess
+    from explainer.tts import ffmpeg_exe
+    silent = tmp_path / "silent.mov"
+    subprocess.run(
+        [ffmpeg_exe(), "-hide_banner", "-loglevel", "error", "-y",
+         "-f", "lavfi", "-i", "color=c=black:s=320x240:d=1:r=30",
+         "-f", "lavfi", "-i", "anullsrc=r=48000:cl=mono",
+         "-t", "1", "-c:a", "pcm_s16le", str(silent)], check=True)
+    with pytest.raises(assembly.AssemblyError) as e:
+        assembly._assert_audible(silent)
+    assert "silence" in str(e.value)
+
+
+def test_audible_audio_passes_the_check(tmp_path):
+    import subprocess
+    from explainer.tts import ffmpeg_exe
+    tone = tmp_path / "tone.mov"
+    subprocess.run(
+        [ffmpeg_exe(), "-hide_banner", "-loglevel", "error", "-y",
+         "-f", "lavfi", "-i", "color=c=black:s=320x240:d=1:r=30",
+         "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000",
+         "-t", "1", "-c:a", "pcm_s16le", str(tone)], check=True)
+    assembly._assert_audible(tone)          # must not raise
