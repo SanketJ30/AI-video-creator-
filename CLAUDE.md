@@ -120,6 +120,7 @@ this. Don't try to make it one pass.
 ```
 migrations/0001_init.sql     §6.3 schema. Add new files, never edit applied ones.
 prompts/<name>.v<N>.md       Versioned prompts. Bump the filename to bump the version.
+docs/known-issues.md         Named defects. ISSUE-1 is BLOCKING — read before Stage 2c.
 docs/prd/Sequence_v0.2.md    THE SPEC. All §x.y references resolve here.
 docs/prd/CHALLENGES.md       R1–R8, the irreversible decisions.
 docs/prd/PRD_v4.md           Historical. Different numbering — do not cite it.
