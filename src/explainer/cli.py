@@ -12,11 +12,13 @@ from __future__ import annotations
 
 import json as jsonlib
 import sys
-from typing import Optional
 
 import typer
 
-from . import db, manifest as manifest_mod, orchestrator, worker
+from . import brief as brief_mod
+from . import coursegraph, db, goldgraph, orchestrator, worker
+from . import manifest as manifest_mod
+from .agents import objective_extractor
 from .config import settings
 from .orchestrator import load_video
 
@@ -26,10 +28,16 @@ db_app = typer.Typer(no_args_is_help=True, help="Schema management.")
 series_app = typer.Typer(no_args_is_help=True, help="Series (§10.3 curriculum scope).")
 video_app = typer.Typer(no_args_is_help=True, help="Videos.")
 beat_app = typer.Typer(no_args_is_help=True, help="Beats — the atomic unit (§5.3).")
+course_app = typer.Typer(no_args_is_help=True,
+                         help="Courses and the Course Brief (§6 Stage 1).")
+objectives_app = typer.Typer(no_args_is_help=True,
+                             help="The objective graph (§5.3) — the course spine.")
 app.add_typer(db_app, name="db")
 app.add_typer(series_app, name="series")
 app.add_typer(video_app, name="video")
 app.add_typer(beat_app, name="beat")
+app.add_typer(course_app, name="course")
+app.add_typer(objectives_app, name="objectives")
 
 err = typer.style
 
@@ -100,7 +108,7 @@ def series_create(
     locale: str = typer.Option("en", "--locale", help="D7 — ship EN only, keep the column"),
     audience_level: str = typer.Option("intermediate", "--audience-level", help="D1"),
     brand_version: str = typer.Option("1.0.0", "--brand-version"),
-    curriculum: Optional[str] = typer.Option(None, "--curriculum", help="path to curriculum.yaml"),
+    curriculum: str | None = typer.Option(None, "--curriculum", help="path to curriculum.yaml"),
 ) -> None:
     yaml_text = open(curriculum).read() if curriculum else None
     with db.tx() as conn:
@@ -156,6 +164,298 @@ def video_create(
     typer.echo(f"video {ref} ready ({beats} beats, graph={graph})")
 
 
+# -------------------------------------------------------------------- course
+
+@course_app.command("create")
+def course_create(
+    slug: str,
+    title: str = typer.Option("", "--title", help="defaults to the slug"),
+    description: str = typer.Option("", "--description", "-d",
+                                    help="what the course is about — the extractor reads this"),
+    source: list[str] = typer.Option([], "--source",
+                                     help="source material ref (repeatable): url, doc id or asset sha"),
+    level: str = typer.Option(brief_mod.DEFAULT_AUDIENCE_LEVEL, "--level"),
+    prior: list[str] = typer.Option([], "--prior",
+                                    help="prior knowledge, repeatable — drives `assumed` objectives"),
+    native_ratio: float = typer.Option(0.0, "--native-language-ratio"),
+    seconds: int = typer.Option(brief_mod.DEFAULT_TARGET_SECONDS, "--seconds",
+                                help="target seconds per video"),
+    locale: str = typer.Option(brief_mod.DEFAULT_LOCALE, "--locale",
+                               help="comma-separated; the first is primary"),
+    tone: str = typer.Option(brief_mod.DEFAULT_TONE, "--tone"),
+    brand: str | None = typer.Option(None, "--brand-kit"),
+    reference: str | None = typer.Option(None, "--reference-video"),
+) -> None:
+    """Create a course and version 1 of its Course Brief.
+
+    Every field has a defensible default (see brief.py) — a slug alone produces
+    a complete, usable brief. Nothing here blocks generation.
+    """
+    b = brief_mod.CourseBrief(
+        title=title or slug,
+        description=description,
+        source_material=tuple(source),
+        audience=brief_mod.Audience(level=level, prior_knowledge=tuple(prior),
+                                    native_language_ratio=native_ratio),
+        target_seconds_per_video=seconds,
+        locales=tuple(x.strip() for x in locale.split(",") if x.strip()),
+        brand_kit_ref=brand, tone=tone, reference_video_ref=reference,
+    )
+    with db.tx() as conn:
+        course_id = brief_mod.ensure_course(conn, slug, b)
+        saved = brief_mod.save(conn, course_id, b,
+                               provenance={"source": "cli", "command": "course create"})
+    typer.echo(f"course {slug} ready — brief v{saved.version}")
+
+
+@course_app.command("list")
+def course_list() -> None:
+    with db.tx() as conn:
+        rows = brief_mod.list_courses(conn)
+    for r in rows:
+        typer.echo(f"{r['slug']:28} brief=v{r['brief_version'] or 0} "
+                   f"objectives={r['objectives']:<3} {r['locale']}  {r['title']}")
+    typer.echo(f"{len(rows)} courses")
+
+
+@course_app.command("brief")
+def course_brief(slug: str,
+                 version: int | None = typer.Option(None, "--version"),
+                 history: bool = typer.Option(False, "--history")) -> None:
+    """Show a Course Brief, or its version history."""
+    with db.tx() as conn:
+        course_id = brief_mod.course_id_for(conn, slug)
+        if history:
+            for r in brief_mod.history(conn, course_id):
+                typer.echo(f"v{r['version']:<3} {r['created_at']:%Y-%m-%d %H:%M}  "
+                           f"{jsonlib.dumps(r['provenance'])}")
+            return
+        b = brief_mod.load(conn, course_id, version)
+    typer.echo(f"# {slug} brief v{b.version}")
+    typer.echo(b.render_for_prompt())
+
+
+@course_app.command("edit")
+def course_edit(
+    slug: str,
+    description: str | None = typer.Option(None, "--description", "-d"),
+    tone: str | None = typer.Option(None, "--tone"),
+    seconds: int | None = typer.Option(None, "--seconds"),
+    level: str | None = typer.Option(None, "--level"),
+    prior: list[str] | None = typer.Option(None, "--prior",
+                                              help="replaces prior knowledge entirely"),
+    note: str | None = typer.Option(None, "--note", help="why you changed it"),
+    regenerate: bool = typer.Option(False, "--regenerate",
+                                    help="re-extract the objective graph from the edited brief"),
+) -> None:
+    """Edit the brief as a NEW version, optionally regenerating from it.
+
+    §6 Stage 1: the brief is versioned and editable, so this never overwrites a
+    brief a human approved — it writes the next version.
+    """
+    changes: dict = {}
+    if description is not None:
+        changes["description"] = description
+    if tone is not None:
+        changes["tone"] = tone
+    if seconds is not None:
+        changes["target_seconds_per_video"] = seconds
+    audience: dict = {}
+    if level is not None:
+        audience["level"] = level
+    if prior:
+        audience["prior_knowledge"] = list(prior)
+    if audience:
+        changes["audience"] = audience
+    if not changes:
+        typer.echo("nothing to change", err=True)
+        raise typer.Exit(1)
+
+    with db.tx() as conn:
+        course_id = brief_mod.course_id_for(conn, slug)
+        if regenerate:
+            outcome = _run_extraction(conn, course_id, slug, changes=changes, note=note)
+            _report_extraction(conn, course_id, slug, outcome)
+        else:
+            saved = brief_mod.revise(conn, course_id, changes, note=note)
+            typer.echo(f"{slug} brief v{saved.version} written "
+                       f"({', '.join(sorted(changes))} changed) — "
+                       f"`explainer objectives extract {slug}` to rebuild the graph")
+
+
+# ---------------------------------------------------------------- objectives
+
+def _run_extraction(conn, course_id: str, slug: str,
+                    changes: dict | None = None, note: str | None = None):
+    from .escalation import Escalated
+    try:
+        if changes:
+            return brief_mod.regenerate_from_edited_brief(conn, course_id, changes,
+                                                          note=note)
+        b = brief_mod.load(conn, course_id)
+        return objective_extractor.extract(conn, course_id, b)
+    except Escalated as e:
+        # Invariant 7: an escalation is a state, not a stack trace. It is
+        # already recorded; print it in the form a human can act on.
+        typer.echo(typer.style(e.render(), fg=typer.colors.MAGENTA), err=True)
+        raise typer.Exit(2) from None
+
+
+def _report_extraction(conn, course_id: str, slug: str, outcome) -> None:
+    graph = coursegraph.save(conn, course_id, outcome.objectives, outcome.items,
+                             provenance=outcome.provenance,
+                             rationales=outcome.rationales)
+    typer.echo(coursegraph.render(graph))
+    typer.echo("")
+    typer.echo(f"{len(outcome.objectives)} objectives, {len(outcome.items)} assessment "
+               f"items, {len(outcome.attempts)} model call(s), "
+               f"${outcome.cost_usd:.4f}")
+    typer.echo(f"teaching order: {' -> '.join(graph.teaching_order)}")
+    typer.echo("")
+    colour = typer.colors.GREEN if outcome.report.ok else typer.colors.RED
+    typer.echo(typer.style(outcome.report.render(), fg=colour))
+    if not outcome.report.ok:
+        typer.echo("")
+        typer.echo("blocking findings are NOT auto-fixed — edit the brief and "
+                   f"`explainer course edit {slug} --regenerate`, or fix the graph "
+                   "by hand.")
+
+
+@objectives_app.command("extract")
+def objectives_extract(
+    slug: str,
+    show_raw: bool = typer.Option(False, "--raw",
+                                  help="print the model's raw response before parsing"),
+    raw_out: str | None = typer.Option(None, "--raw-out",
+                                          help="write every attempt's raw response here"),
+    model: str | None = typer.Option(None, "--model",
+                                        help="override the pinned model FOR THIS RUN only "
+                                             "(§6.6: the pin lives in .env, not here)"),
+) -> None:
+    """Extract the objective graph from the course's latest brief.
+
+    The first real model call. Output is validated by objectives.py — code, not
+    a model — and blocking findings are reported, never silently repaired.
+    """
+    with db.tx() as conn:
+        course_id = brief_mod.course_id_for(conn, slug)
+        if model:
+            from .escalation import Escalated
+            b = brief_mod.load(conn, course_id)
+            try:
+                outcome = objective_extractor.extract(conn, course_id, b, model=model)
+            except Escalated as e:
+                typer.echo(typer.style(e.render(), fg=typer.colors.MAGENTA), err=True)
+                raise typer.Exit(2) from None
+        else:
+            outcome = _run_extraction(conn, course_id, slug)
+
+        if show_raw:
+            for a in outcome.attempts:
+                typer.echo(typer.style(
+                    f"--- raw response, attempt {a.n} "
+                    f"({a.input_tokens} in / {a.output_tokens} out) ---",
+                    fg=typer.colors.BRIGHT_BLACK))
+                typer.echo(a.raw)
+                if a.error:
+                    typer.echo(typer.style(f"    rejected: {a.error}",
+                                           fg=typer.colors.YELLOW))
+            typer.echo("")
+        if raw_out:
+            with open(raw_out, "w", encoding="utf-8") as fh:
+                jsonlib.dump([{"attempt": a.n, "raw": a.raw, "error": a.error,
+                               "input_tokens": a.input_tokens,
+                               "output_tokens": a.output_tokens} for a in outcome.attempts],
+                             fh, indent=2)
+            typer.echo(f"raw responses written to {raw_out}")
+
+        _report_extraction(conn, course_id, slug, outcome)
+    raise typer.Exit(0 if outcome.report.ok else 1)
+
+
+@objectives_app.command("show")
+def objectives_show(slug: str,
+                    as_json: bool = typer.Option(False, "--json")) -> None:
+    """Render the stored objective graph and its ValidationReport."""
+    with db.tx() as conn:
+        course_id = brief_mod.course_id_for(conn, slug)
+        graph = coursegraph.load(conn, course_id)
+    if not graph.objectives:
+        typer.echo(f"no objective graph for '{slug}' — run "
+                   f"`explainer objectives extract {slug}`", err=True)
+        raise typer.Exit(1)
+    report = graph.validate()
+    if as_json:
+        typer.echo(jsonlib.dumps({
+            "teaching_order": graph.teaching_order,
+            "objectives": [{"ref": o.ref, "verb": o.verb, "object": o.object,
+                            "bloom_level": o.bloom_level.value,
+                            "knowledge_type": o.knowledge_type.value,
+                            "assumed": o.assumed,
+                            "prerequisites": o.prerequisites} for o in graph.objectives],
+            "findings": [{"rule": f.rule, "severity": f.severity,
+                          "subject": f.subject, "message": f.message, "fix": f.fix}
+                         for f in report.findings],
+            "ok": report.ok,
+        }, indent=2))
+        raise typer.Exit(0 if report.ok else 1)
+
+    typer.echo(coursegraph.render(graph))
+    typer.echo("")
+    typer.echo(f"teaching order: {' -> '.join(graph.teaching_order)}")
+    typer.echo("")
+    typer.echo(typer.style(report.render(),
+                           fg=typer.colors.GREEN if report.ok else typer.colors.RED))
+    raise typer.Exit(0 if report.ok else 1)
+
+
+@objectives_app.command("diff")
+def objectives_diff(
+    slug: str,
+    against: str = typer.Option(..., "--against",
+                                help="path to a hand-authored gold graph yaml"),
+) -> None:
+    """Compare the stored graph against a hand-authored gold graph.
+
+    Reports missing objectives, extra objectives, wrong Bloom levels and wrong
+    edges. Alignment is by content, not by ref, and is printed so you can reject
+    a pairing the matcher got wrong.
+    """
+    gold = goldgraph.load_gold(against)
+    with db.tx() as conn:
+        course_id = brief_mod.course_id_for(conn, slug)
+        graph = coursegraph.load(conn, course_id)
+    if not graph.objectives:
+        typer.echo(f"no objective graph for '{slug}' — run "
+                   f"`explainer objectives extract {slug}` first", err=True)
+        raise typer.Exit(1)
+
+    d = goldgraph.diff(graph.objectives, gold)
+    typer.echo(f"gold: {gold.path}  ({gold.topic})")
+    typer.echo(d.render())
+    if gold.notes:
+        typer.echo("")
+        typer.echo("the gold file's own notes on what to watch for:")
+        for n in gold.notes:
+            typer.echo(f"  - {n.strip()}")
+    clean = not (d.missing or d.extra or d.bloom or d.missing_edges or d.extra_edges)
+    raise typer.Exit(0 if clean else 1)
+
+
+@objectives_app.command("escalations")
+def objectives_escalations(slug: str | None = typer.Argument(None)) -> None:
+    """Open escalations — the queue a human has to unblock (invariant 7)."""
+    from . import escalation
+    with db.tx() as conn:
+        course_id = brief_mod.course_id_for(conn, slug) if slug else None
+        rows = escalation.open_escalations(conn, course_id)
+    for r in rows:
+        typer.echo(f"{r['created_at']:%Y-%m-%d %H:%M}  {r['stage']:22} "
+                   f"[{r['error_class']}] {r['error'][:90]}")
+        typer.echo(f"    next step: {r['next_step']}")
+    typer.echo(f"{len(rows)} open")
+
+
 # ---------------------------------------------------------------------- beat
 
 @beat_app.command("list")
@@ -171,7 +471,7 @@ def beat_list(ref: str) -> None:
 @beat_app.command("edit")
 def beat_edit(ref: str, beat_id: str,
               text: str = typer.Option(..., "--text"),
-              instruction: Optional[str] = typer.Option(None, "--instruction"),
+              instruction: str | None = typer.Option(None, "--instruction"),
               gate: str = typer.Option("a", "--gate")) -> None:
     """Edit a beat brief. This is the one write that must stay beat-local (§5.3)."""
     slug, vid = _split(ref)
@@ -217,7 +517,7 @@ STATUS_COLOR = {"cached": typer.colors.GREEN, "locked": typer.colors.BLUE,
 
 @app.command()
 def resolve(ref: str,
-            target: Optional[str] = typer.Option(None, "--target", help="stop at this stage"),
+            target: str | None = typer.Option(None, "--target", help="stop at this stage"),
             dry_run: bool = typer.Option(False, "--dry-run", help="plan only, enqueue nothing"),
             all_stages: bool = typer.Option(False, "--all", help="include unbuilt stages"),
             as_json: bool = typer.Option(False, "--json")) -> None:
@@ -247,7 +547,7 @@ def resolve(ref: str,
 
 
 @app.command()
-def diff(ref: str, target: Optional[str] = typer.Option(None, "--target")) -> None:
+def diff(ref: str, target: str | None = typer.Option(None, "--target")) -> None:
     """§14.4 — which artifacts a change would touch, before rendering anything."""
     slug, vid = _split(ref)
     with db.tx() as conn:
@@ -280,8 +580,8 @@ def reap() -> None:
 
 
 @app.command()
-def jobs(ref: Optional[str] = typer.Argument(None),
-         state: Optional[str] = typer.Option(None, "--state")) -> None:
+def jobs(ref: str | None = typer.Argument(None),
+         state: str | None = typer.Option(None, "--state")) -> None:
     """Job table view, escalations first — the queue a human has to unblock."""
     sql = """select v.video_id, j.node_key, j.state, j.pool, j.attempts,
                     j.error_class, left(coalesce(j.error,''), 60) as err
@@ -311,7 +611,7 @@ def jobs(ref: Optional[str] = typer.Argument(None),
 # ------------------------------------------------------------------ manifest
 
 @app.command()
-def manifest(ref: str, out: Optional[str] = typer.Option(None, "--out")) -> None:
+def manifest(ref: str, out: str | None = typer.Option(None, "--out")) -> None:
     """Write manifest.json (Appendix A.3)."""
     slug, vid = _split(ref)
     with db.tx() as conn:

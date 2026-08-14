@@ -30,9 +30,13 @@ class ModelPins:
     migration that triggers a golden-set regression run (§14.4).
     """
 
-    frontier: str = field(default_factory=lambda: _env("MODEL_FRONTIER", "claude-opus-4-6-20260401"))
-    mid: str = field(default_factory=lambda: _env("MODEL_MID", "claude-sonnet-4-6-20260315"))
-    vision: str = field(default_factory=lambda: _env("MODEL_VISION", "claude-sonnet-4-6-20260315"))
+    # Pinned to exact published model ids. These strings are complete as-is —
+    # do NOT append a date suffix; a suffixed id 404s at the API. Structured
+    # outputs (the objective extractor's typed-output contract) additionally
+    # require an Opus 5 / Sonnet 5 / Opus 4.8-class model.
+    frontier: str = field(default_factory=lambda: _env("MODEL_FRONTIER", "claude-opus-5"))
+    mid: str = field(default_factory=lambda: _env("MODEL_MID", "claude-sonnet-5"))
+    vision: str = field(default_factory=lambda: _env("MODEL_VISION", "claude-sonnet-5"))
     tts_voice: str = field(default_factory=lambda: _env("TTS_VOICE", "unpinned"))
     tts_model: str = field(default_factory=lambda: _env("TTS_MODEL", "unpinned"))
 

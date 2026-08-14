@@ -9,6 +9,7 @@ dependencies = [
   "python-dotenv>=1.0",
   "boto3>=1.34",
   "pyyaml>=6.0",
+  "anthropic>=0.69",
 ]
 
 [project.optional-dependencies]
@@ -27,6 +28,9 @@ where = ["src"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
+markers = [
+  "live: makes a real, billed model call; skipped without ANTHROPIC_API_KEY",
+]
 
 [tool.ruff]
 line-length = 100

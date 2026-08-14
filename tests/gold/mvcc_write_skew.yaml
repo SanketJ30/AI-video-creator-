@@ -1,0 +1,56 @@
+# Hand-authored gold standard for objective extraction (Milestone A).
+# Authored by Sanket, 14 Aug 2026. NOT generated. Do not let an agent edit this.
+topic: MVCC and the write skew anomaly under Repeatable Read isolation
+engine: postgresql            # o2/o4 are engine-specific — see note below
+
+audience:
+  level: intermediate
+  prior_knowledge:
+    - ACID transaction basics
+    - SQL SELECT and UPDATE
+    - transaction ids (xid)
+  native_language_ratio: 0.0
+
+objectives:
+  - ref: o1
+    verb: explain
+    object: how snapshot isolation gives each transaction a consistent point-in-time view
+    bloom_level: understand
+    knowledge_type: conceptual
+    assumed: true              # taught elsewhere; this video refreshes it only
+    prerequisites: []
+
+  - ref: o2
+    verb: describe
+    object: which anomalies PostgreSQL Repeatable Read prevents, and how
+    bloom_level: understand
+    knowledge_type: conceptual
+    prerequisites: [o1]
+
+  - ref: o3
+    verb: predict
+    object: whether a given pair of concurrent transactions produces write skew
+    condition: given two transactions running overlapping conditional updates under Repeatable Read
+    criterion: correctly, naming the violated invariant and the final database state
+    bloom_level: apply
+    knowledge_type: procedural
+    prerequisites: [o2]
+
+  - ref: o4
+    verb: evaluate               # video 2 — out of scope for Milestone A
+    object: whether SSI will abort a given transaction pair, and which one
+    bloom_level: evaluate
+    knowledge_type: procedural
+    prerequisites: [o3]
+    in_milestone_a: false
+
+assessment_items: []           # TODO Sanket — see below
+
+extraction_notes:
+  - The dependency chain o1 -> o2 -> o3 -> o4 is strict. An extractor that
+    flattens it has failed.
+  - PostgreSQL Repeatable Read is snapshot isolation and prevents phantom reads.
+    The ANSI SQL standard's Repeatable Read permits them. An extractor that
+    conflates the two has made the error this topic was chosen to catch.
+  - Write skew is NOT prevented by Repeatable Read. Any objective or claim
+    stating otherwise is a blocking factual error.
