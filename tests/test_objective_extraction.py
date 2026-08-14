@@ -387,30 +387,68 @@ def test_an_alignment_for_a_different_run_does_not_silently_apply():
     assert d.approximate, "a v1 entry must not be reused for a v2 run"
 
 
+def test_an_alignment_written_before_a_gold_amendment_raises():
+    """v1-run2 covers gold o3, which the gold's v3 amendment merged away. Its
+    coverage judgment for that ref is meaningless and the rest is suspect, so
+    reusing it must raise rather than quietly score."""
+    gold = goldgraph.load_gold(GOLD_PATH)
+    a = goldgraph.load_alignment(ALIGN_PATH)
+    entry = a.by_run("v1-run2")
+    extracted = [_obj(f"o{i}", "predict", f"thing {i}", Bloom.APPLY, "conceptual")
+                 for i in range(1, 11)]
+    with pytest.raises(ValueError) as e:
+        goldgraph.diff_with_alignment(extracted, gold, entry, "test")
+    assert "no longer has" in str(e.value) and "o3" in str(e.value)
+
+
 def test_hand_alignment_reports_coverage_instead_of_one_to_one_misses():
-    """The whole point: 4 gold objectives split across 10 extracted ones are
-    covered, not missing — which the scorer cannot express."""
+    """The point of a hand alignment: gold objectives the extractor split or
+    merged are covered, not missing — which the scorer cannot express."""
     from explainer.objectives import Bloom as B
     gold = goldgraph.load_gold(GOLD_PATH)
     extracted = [
-        _obj("o1", "state", "xid semantics", B.REMEMBER, "factual", assumed=True),
-        _obj("o2", "write", "transaction blocks", B.APPLY, "procedural", assumed=True),
-        _obj("o3", "explain", "tuple versioning", B.UNDERSTAND, "conceptual", ["o1"]),
-        _obj("o4", "identify", "snapshot parts", B.REMEMBER, "factual", ["o3"]),
-        _obj("o5", "predict", "which version is visible", B.APPLY, "procedural", ["o4"]),
-        _obj("o6", "contrast", "snapshot timing RC vs RR", B.ANALYZE, "conceptual", ["o5"]),
-        _obj("o7", "predict", "whether write skew occurs", B.APPLY, "procedural", ["o6"]),
-        _obj("o8", "differentiate", "same-row conflict", B.ANALYZE, "conceptual", ["o7"]),
-        _obj("o9", "trace", "rw dependencies under SSI", B.ANALYZE, "conceptual", ["o7"]),
-        _obj("o10", "recommend", "a remedy", B.EVALUATE, "procedural", ["o8", "o9"]),
+        _obj("o1", "predict", "what each statement reads", B.APPLY, "procedural"),
+        _obj("o2", "differentiate", "write skew from prevented anomalies",
+             B.ANALYZE, "conceptual", ["o1"]),
+        _obj("o3", "define", "a transaction id", B.REMEMBER, "factual",
+             assumed=True),
+        _obj("o4", "write", "SELECT and UPDATE", B.APPLY, "procedural",
+             assumed=True),
+        _obj("o5", "explain", "the ACID guarantees", B.UNDERSTAND, "conceptual",
+             assumed=True),
     ]
     a = goldgraph.load_alignment(ALIGN_PATH)
     d = goldgraph.diff(extracted, gold, alignment=a,
-                       prompt_version="objective_extractor@v1+03930968")
-    assert d.method == "hand", "10 objectives on v1 must select the v1-run2 entry"
-    assert not d.missing, "every gold objective is covered by some extracted group"
-    assert not d.extra
-    assert "HAND" in d.render()
+                       prompt_version="objective_extractor@v3+x", brief_version=3)
+    assert d.method == "hand", "brief v3 must select the v3-run3 entry"
+    assert not d.missing, "o1 and o2 are covered; o4 is excluded, not missing"
+    assert d.excluded == ["o4"]
+    assert "excluded by scope, not counted" in d.render()
+
+
+def test_excluded_by_scope_is_not_counted_as_missing():
+    """Sanket's resolution: scoring a deliberately out-of-scope objective as
+    missing punishes the exact behaviour the prompt specifies."""
+    from explainer.objectives import Bloom as B
+    gold = goldgraph.load_gold(GOLD_PATH)
+    extracted = [
+        _obj("o1", "predict", "what each statement reads", B.APPLY, "procedural"),
+        _obj("o2", "differentiate", "write skew from prevented anomalies",
+             B.ANALYZE, "conceptual", ["o1"]),
+        _obj("o3", "define", "a transaction id", B.REMEMBER, "factual",
+             assumed=True),
+        _obj("o4", "write", "SELECT and UPDATE", B.APPLY, "procedural",
+             assumed=True),
+        _obj("o5", "explain", "the ACID guarantees", B.UNDERSTAND, "conceptual",
+             assumed=True),
+    ]
+    a = goldgraph.load_alignment(ALIGN_PATH)
+    d = goldgraph.diff(extracted, gold, alignment=a,
+                       prompt_version="objective_extractor@v3+x", brief_version=3)
+    assert "o4" in d.excluded
+    assert "o4" not in d.missing
+    # An edge into an excluded objective is not a missing edge either.
+    assert ("o2", "o4") not in d.missing_edges
 
 
 def test_a_stale_alignment_raises_rather_than_scoring_around_it():
