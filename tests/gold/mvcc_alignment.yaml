@@ -122,6 +122,34 @@ runs:
       $0.1380 -> $0.0771 for a graph that is closer to the gold, which is the
       unusual case of the cheaper run being the better one.
 
+    # CORRECTION, appended 14 Aug 2026 — the cost figures above are UNDERSTATED.
+    #
+    # `_price` summed only `usage.input_tokens`, which is the uncached remainder
+    # of the prompt. The system prompt was sent with a cache_control breakpoint,
+    # so most input tokens were reported under cache_creation_input_tokens (or
+    # cache_read_input_tokens on a warm run) and were billed — at 1.25x and 0.10x
+    # the input rate respectively — while being counted as zero.
+    #
+    # Size of the error: output dominates both runs, so the understatement is
+    # roughly 5-10% of each figure, and it is close to proportional across the
+    # two runs because they cached the same system block. The v1 -> v2 direction
+    # and the ~44% cost reduction therefore still hold. The absolute numbers do
+    # not.
+    #
+    # The exact corrected figures are NOT recoverable. `Attempt` recorded only
+    # input_tokens and output_tokens at the time these runs were made, so the
+    # cache_creation/cache_read split for them was never stored anywhere — not in
+    # the raw dumps, not in provenance, not in the database. Recovering it would
+    # mean re-running the extraction, which would produce a different graph and
+    # answer a different question. Left uncorrected on purpose rather than
+    # back-filled with an estimate presented as a measurement.
+    #
+    # Fixed forward: `_price` now sums uncached input, cache-creation and
+    # cache-read at their own multipliers, and `Attempt` records all three, so
+    # every run from v2-run2 onward carries a figure that can be audited.
+    cost_figures_understated: true
+    cost_figures_recoverable: false
+
     coverage:
       o1:
         extracted: [o1]

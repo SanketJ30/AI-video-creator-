@@ -129,10 +129,21 @@ class Attempt:
 
     n: int
     raw: str
+    # `input_tokens` is the UNCACHED remainder only. The cached portion of the
+    # prompt is reported separately and is billed at different rates, so all
+    # three have to be recorded or the cost is wrong — see `_price`. The first
+    # three runs of this agent recorded only two of them and under-reported
+    # their cost by roughly 9%; that is why these fields exist.
     input_tokens: int = 0
+    cache_creation_tokens: int = 0
+    cache_read_tokens: int = 0
     output_tokens: int = 0
     cost_usd: float = 0.0
     error: str | None = None
+
+    @property
+    def total_input_tokens(self) -> int:
+        return self.input_tokens + self.cache_creation_tokens + self.cache_read_tokens
 
 
 @dataclass
@@ -341,13 +352,31 @@ def _client(conn=None, course_id: str | None = None):
                       "currently configured.")
 
 
+# Prompt-caching multipliers on the INPUT rate. A cache write costs more than a
+# plain input token; a cache read costs a fraction of one. Counting only the
+# uncached remainder — as this function originally did — silently under-reports
+# every cached run, and gets worse the better caching works, which is the wrong
+# way round for a budget that §15 treats as a first-class constraint.
+CACHE_WRITE_MULTIPLIER = 1.25
+CACHE_READ_MULTIPLIER = 0.10
+
+
 def _price(model: str, usage) -> float:
+    """Cost of one call, summing all four token classes at their own rates."""
     rates = PRICES_PER_MTOK.get(model)
     if not rates:
         return 0.0
-    inp = getattr(usage, "input_tokens", 0) or 0
+    in_rate, out_rate = rates
+    uncached = getattr(usage, "input_tokens", 0) or 0
+    written = getattr(usage, "cache_creation_input_tokens", 0) or 0
+    read = getattr(usage, "cache_read_input_tokens", 0) or 0
     out = getattr(usage, "output_tokens", 0) or 0
-    return (inp * rates[0] + out * rates[1]) / 1_000_000
+    return (
+        uncached * in_rate
+        + written * in_rate * CACHE_WRITE_MULTIPLIER
+        + read * in_rate * CACHE_READ_MULTIPLIER
+        + out * out_rate
+    ) / 1_000_000
 
 
 def _call(client, model: str, system: str, messages: list[dict]):
@@ -419,10 +448,13 @@ def extract(conn, course_id: str | None, brief: CourseBrief, *,
                           "on purpose and must name a model that exists.")
             raise  # unreachable; raise_escalated always raises
 
-        attempt = Attempt(n=n, raw=raw,
-                          input_tokens=getattr(usage, "input_tokens", 0) or 0,
-                          output_tokens=getattr(usage, "output_tokens", 0) or 0,
-                          cost_usd=_price(model_id, usage))
+        attempt = Attempt(
+            n=n, raw=raw,
+            input_tokens=getattr(usage, "input_tokens", 0) or 0,
+            cache_creation_tokens=getattr(usage, "cache_creation_input_tokens", 0) or 0,
+            cache_read_tokens=getattr(usage, "cache_read_input_tokens", 0) or 0,
+            output_tokens=getattr(usage, "output_tokens", 0) or 0,
+            cost_usd=_price(model_id, usage))
         attempts.append(attempt)
 
         try:

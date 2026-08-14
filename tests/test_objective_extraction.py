@@ -392,3 +392,39 @@ def test_a_stale_alignment_raises_rather_than_scoring_around_it():
         goldgraph.diff_with_alignment([_obj("zz", "explain", "x", Bloom.UNDERSTAND,
                                             "conceptual")], gold, entry, "test")
     assert "not in this graph" in str(e.value)
+
+
+# --------------------------------------------------------------- cost model
+
+class _Usage:
+    def __init__(self, **kw):
+        self.input_tokens = kw.get("input_tokens", 0)
+        self.cache_creation_input_tokens = kw.get("cache_creation_input_tokens", 0)
+        self.cache_read_input_tokens = kw.get("cache_read_input_tokens", 0)
+        self.output_tokens = kw.get("output_tokens", 0)
+
+
+def test_price_counts_all_four_token_classes():
+    """The bug this guards: counting only uncached input under-reported every
+    cached run, and got worse the better caching worked."""
+    # claude-opus-5 is $5/$25 per MTok.
+    cost = ox._price("claude-opus-5", _Usage(
+        input_tokens=1_000_000,                  # 1.00x  -> $5.00
+        cache_creation_input_tokens=1_000_000,   # 1.25x  -> $6.25
+        cache_read_input_tokens=1_000_000,       # 0.10x  -> $0.50
+        output_tokens=1_000_000,                 #        -> $25.00
+    ))
+    assert round(cost, 6) == 36.75
+
+
+def test_price_ignoring_cache_would_be_lower():
+    """Regression direction: the old formula must not be able to creep back."""
+    usage = _Usage(input_tokens=310, cache_creation_input_tokens=2000,
+                   output_tokens=3022)
+    full = ox._price("claude-opus-5", usage)
+    uncached_only = (310 * 5 + 3022 * 25) / 1_000_000
+    assert full > uncached_only
+
+
+def test_price_is_zero_for_an_unpriced_model():
+    assert ox._price("some-model-we-have-no-rate-for", _Usage(output_tokens=99)) == 0.0
