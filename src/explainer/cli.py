@@ -250,6 +250,9 @@ def course_edit(
     description: str | None = typer.Option(None, "--description", "-d"),
     tone: str | None = typer.Option(None, "--tone"),
     seconds: int | None = typer.Option(None, "--seconds"),
+    max_videos: int | None = typer.Option(
+        None, "--max-videos",
+        help="how many videos the course may spend. A SHIPPING decision, not a content one — see the brief docstring."),
     level: str | None = typer.Option(None, "--level"),
     prior: list[str] | None = typer.Option(None, "--prior",
                                               help="replaces prior knowledge entirely"),
@@ -269,6 +272,8 @@ def course_edit(
         changes["tone"] = tone
     if seconds is not None:
         changes["target_seconds_per_video"] = seconds
+    if max_videos is not None:
+        changes["max_videos"] = max_videos
     audience: dict = {}
     if level is not None:
         audience["level"] = level

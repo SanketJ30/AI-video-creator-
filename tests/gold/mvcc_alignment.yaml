@@ -621,3 +621,64 @@ runs:
       What this file needs before it can act as the §14.4 regression harness is
       several samples per configuration and a stated pass criterion, not one
       draw per prompt version. Flagged for Sanket.
+
+  # ---------------------------------------------------------------------------
+  # DRAFTED BY CLAUDE CODE, 15 Aug 2026 — NOT reviewed by a human.
+  # The test of the granularity explanation: give the extractor room and see
+  # whether the anomaly criterion recovers.
+  # ---------------------------------------------------------------------------
+  - run: v3-run5
+    prompt_version: objective_extractor@v3
+    brief_version: 5
+    model: claude-opus-5 (MODEL_FRONTIER as pinned 15 Aug 2026)
+    note: >-
+      max_videos raised 1 -> 2. Sanket's reasoning, recorded because it is the
+      substantive point and not the parameter: naming the three anomalies is
+      what makes the ANSI-vs-PostgreSQL distinction testable by output, and that
+      distinction is why this topic was chosen. §5.3's 1-2 objectives per video
+      is satisfied by two videos of two objectives just as well as by one video
+      of two. The binding constraint was max_videos: 1, a Milestone A SHIPPING
+      decision that had leaked into the gold's CONTENT spec. Two separate
+      concerns, conflated.
+      This entry is the falsification test for the granularity explanation. If
+      the anomaly criterion does not recover at 2-of-3 with room available, the
+      granularity explanation is incomplete and must be stated as such rather
+      than smoothed over.
+
+    checks:
+      - name: mentions_all
+        label: names all three anomalies
+        params: {terms: [dirty read, non-repeatable read, phantom read]}
+      - name: taught_count
+        label: emits 2-4 taught objectives (max_videos 2)
+        params: {min: 2, max: 4}
+      - name: max_taught_bloom
+        label: reaches analyze level (gold o2)
+        params: {level: analyze}
+
+    harness_2026_08_15:
+      samples: 3
+      pass_criterion: met in at least 2 of 3
+      cost_usd: 0.5934
+      taught_objective_counts: [4, 3, 4]
+      results:
+        names all three anomalies:   {results: [true, true, true],   verdict: met in 3 of 3 - PASSES}
+        emits 2-4 taught objectives: {results: [true, true, true],   verdict: met in 3 of 3 - PASSES}
+        reaches analyze level:       {results: [false, false, true], verdict: met in 1 of 3 - FAILS}
+      verdict_2026_08_15: >-
+        THE GRANULARITY EXPLANATION IS CONFIRMED for the anomaly criterion. Given
+        room, the taxonomy returns completely: 0 of 3 at max_videos 1, 3 of 3 at
+        max_videos 2, prompt and gold unchanged. That is the falsification test
+        passing, and it is the only claim in this file with a controlled
+        before/after at 3 samples on each arm.
+        A NEW TRADE APPEARED, in the same mechanism running the other way. The
+        analyze-level check FELL from 2 of 3 to 1 of 3. With four objectives to
+        spend the extractor splits the analysis into finer apply-level steps
+        instead of producing one analyze-level objective, so the graph's Bloom
+        peak drops. The two checks trade against each other along the objective-
+        count axis: at max_videos 1 you get analyze and not the taxonomy, at
+        max_videos 2 you get the taxonomy and not reliably analyze.
+        Stated rather than smoothed: the granularity explanation accounts for
+        the anomaly result completely and predicts the Bloom result only in
+        hindsight. Whether a 3-video budget recovers both is untested.
+

@@ -37,11 +37,20 @@ from . import db
 
 DEFAULT_AUDIENCE_LEVEL = "intermediate"       # §2 D1
 DEFAULT_TARGET_SECONDS = 240
-# One video per objective pair (§5.3). The extractor uses this to size an
+# How many videos the course may spend. The extractor uses it to size an
 # objective: without it, prompt v1 reproducibly emitted ~10 scene-sized
-# objectives where the gold graph has 4 video-sized ones.
-DEFAULT_MAX_VIDEOS = 1                  # 4 minutes — the §15 latency and
-                                              # cost budget is built on this
+# objectives (measured: 8, 7, 7 taught across three samples) where the gold
+# graph has video-sized ones.
+#
+# This is a SHIPPING decision, not a content one, and the two were conflated
+# once already. §5.3 caps a video at 1-2 objectives; that is satisfied just as
+# well by two videos of two objectives as by one. Setting max_videos=1 for a
+# Milestone A that only renders one video pushed the extractor to drop content
+# the gold requires — measured at 0 of 3 samples naming the three anomalies,
+# against 3 of 3 for the ungoverned prompt v1. The default stays 1 because a
+# course with no stated budget should not sprawl, but raising it is the right
+# move whenever the objective graph is being starved rather than shaped.
+DEFAULT_MAX_VIDEOS = 1
 DEFAULT_LOCALE = "en"                         # D7 — ship EN only, keep the field
 DEFAULT_TONE = ("plain, concrete and unhurried; explain the mechanism rather "
                 "than the vocabulary; no hype, no filler")
