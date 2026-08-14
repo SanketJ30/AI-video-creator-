@@ -36,6 +36,8 @@ curriculum_app = typer.Typer(no_args_is_help=True,
                              help="Curriculum planning (§6 Stage 2b).")
 script_app = typer.Typer(no_args_is_help=True,
                          help="Script generation into Gagné slots (§6 Stage 2c).")
+harness_app = typer.Typer(no_args_is_help=True,
+                          help="The §14.4 regression harness — multi-sample.")
 app.add_typer(db_app, name="db")
 app.add_typer(series_app, name="series")
 app.add_typer(video_app, name="video")
@@ -44,6 +46,7 @@ app.add_typer(course_app, name="course")
 app.add_typer(objectives_app, name="objectives")
 app.add_typer(curriculum_app, name="curriculum")
 app.add_typer(script_app, name="script")
+app.add_typer(harness_app, name="harness")
 
 err = typer.style
 
@@ -499,6 +502,72 @@ def objectives_escalations(slug: str | None = typer.Argument(None)) -> None:
                    f"[{r['error_class']}] {r['error'][:90]}")
         typer.echo(f"    next step: {r['next_step']}")
     typer.echo(f"{len(rows)} open")
+
+
+# ------------------------------------------------------------------- harness
+
+@harness_app.command("run")
+def harness_run(
+    slug: str,
+    checks_from: str = typer.Option(..., "--checks-from",
+                                    help="alignment yaml holding the check specs"),
+    config: str = typer.Option(..., "--config",
+                               help="the run id in that file whose checks to use"),
+    samples: int = typer.Option(3, "--samples"),
+    pass_k: int = typer.Option(2, "--pass-k", help="k in 'met in k of n'"),
+    prompt_version: int | None = typer.Option(
+        None, "--prompt-version", help="pin the extractor prompt (harness only)"),
+    description: str | None = typer.Option(
+        None, "--description", help="override the brief description for this run only"),
+    store: bool = typer.Option(False, "--store",
+                               help="persist the LAST sample's graph (off by default)"),
+) -> None:
+    """Run N extraction samples of one configuration and score its checks.
+
+    Nothing is written to the objective graph unless --store: the harness
+    measures spread, and a run that quietly replaced the course's graph three
+    times would make the measurement itself a side effect.
+    """
+    import yaml as _yaml
+
+    from . import harness
+    doc = _yaml.safe_load(open(checks_from, encoding="utf-8").read()) or {}
+    entry = next((r for r in (doc.get("runs") or []) if r.get("run") == config), None)
+    if entry is None:
+        typer.echo(f"no run '{config}' in {checks_from}", err=True)
+        raise typer.Exit(1)
+    raw_checks = entry.get("checks") or []
+    if not raw_checks:
+        typer.echo(f"run '{config}' declares no checks — a configuration with no "
+                   f"stated pass criterion cannot be measured", err=True)
+        raise typer.Exit(1)
+    specs = harness.specs_from_yaml(raw_checks)
+
+    with db.tx() as conn:
+        course_id = brief_mod.course_id_for(conn, slug)
+        b = brief_mod.load(conn, course_id)
+        if description is not None:
+            b = b.edited(description=description)
+
+        def progress(sample, res):
+            typer.echo(typer.style(
+                f"  sample {sample.n}/{samples}: "
+                f"{len([o for o in sample.objectives if not o.assumed])} taught, "
+                f"${sample.cost_usd:.4f}", fg=typer.colors.BRIGHT_BLACK))
+
+        result = harness.run(conn, course_id, b, specs, config=config,
+                             samples=samples, pass_k=pass_k,
+                             prompt_version=prompt_version, on_sample=progress)
+        if store:
+            last = result.samples[-1]
+            typer.echo(f"storing sample {last.n}'s graph")
+
+    typer.echo("")
+    typer.echo(result.render())
+    typer.echo("")
+    typer.echo(typer.style("--- yaml fragment for the alignment file ---",
+                           fg=typer.colors.BRIGHT_BLACK))
+    typer.echo(result.to_yaml_fragment())
 
 
 # ---------------------------------------------------------------- curriculum

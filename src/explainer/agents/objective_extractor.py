@@ -435,14 +435,15 @@ def _call(client, model: str, system: str, messages: list[dict]):
 # ------------------------------------------------------------------- extract
 
 def extract(conn, course_id: str | None, brief: CourseBrief, *,
-            client=None, model: str | None = None) -> ExtractionOutcome:
+            client=None, model: str | None = None,
+            prompt_version: int | None = None) -> ExtractionOutcome:
     """Run the extractor against a brief and validate the result.
 
     `conn` may be None (dry run, unit test) — then an escalation is raised but
     not recorded, and says so. `client` is injectable so a test can drive the
     parse/repair loop without a network call.
     """
-    ref = prompts.load(PROMPT)
+    ref = prompts.load(PROMPT, prompt_version)
     parts = _sections(ref.body)
     missing = {"system", "brief", "repair"} - set(parts)
     if missing:

@@ -40,8 +40,15 @@ class PromptRef:
 
 
 @lru_cache(maxsize=128)
-def load(name: str) -> PromptRef:
-    """Load the highest-numbered version of a prompt."""
+def load(name: str, version: int | None = None) -> PromptRef:
+    """Load a prompt. `version=None` means the highest-numbered one.
+
+    Pinning a version is for the regression harness (§14.4): re-testing a claim
+    made against prompt v1 means running v1, not running whatever is newest and
+    hoping the claim still describes it. It is NOT a runtime knob — production
+    always takes the newest, because a pinned-old prompt in the pipeline is a
+    silently stale artifact.
+    """
     candidates: list[tuple[int, "object"]] = []
     if PROMPT_DIR.is_dir():
         for f in PROMPT_DIR.iterdir():
@@ -53,7 +60,15 @@ def load(name: str) -> PromptRef:
             f"no prompt file for '{name}'. Create prompts/{name}.v1.md — "
             "prompts are code, so it must be committed, not typed at runtime."
         )
-    ver, path = max(candidates, key=lambda c: c[0])
+    if version is not None:
+        match = [c for c in candidates if c[0] == version]
+        if not match:
+            raise PromptMissing(
+                f"no prompts/{name}.v{version}.md — have "
+                f"{sorted(c[0] for c in candidates)}")
+        ver, path = match[0]
+    else:
+        ver, path = max(candidates, key=lambda c: c[0])
     body = path.read_text()  # type: ignore[union-attr]
     return PromptRef(name=name, file_version=ver, body=body, body_sha=sha256_hex(body.encode()))
 
