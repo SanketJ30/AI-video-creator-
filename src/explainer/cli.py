@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json as jsonlib
 import sys
+from pathlib import Path
 
 import typer
 
@@ -1100,6 +1101,138 @@ def _render_lint(report) -> str:
 
 def _kv(d: dict) -> str:
     return ", ".join(f"{k}={v}" for k, v in d.items() if k != "authored") or "-"
+
+
+# ---------------------------------------------------------------------- render
+
+def _video_timeline(conn, slug: str, video_ref: str):
+    """Phase one of §11.2: resolve every duration before anything renders."""
+    from .agents import script_writer as sw
+    from . import resolver
+    course_id, video = _script_context(conn, slug, video_ref)
+    rows = sw.load(conn, str(video["id"]))
+    if not rows:
+        raise LookupError(f"no script for '{video_ref}'")
+    entries = []
+    for r in rows:
+        nar = speech.StoredNarration.from_rows(r["narration"])
+        sp = speech.speak(r["ref"], nar)
+        spec = r["visual_spec"] or {}
+        entries.append({"ref": r["ref"], "speech": sp,
+                        "timing_sensitivity": r["timing_sensitivity"],
+                        "target_seconds": (r["pedagogy_meta"] or {}).get(
+                            "duration_target_seconds"),
+                        "cues": spec.get("cues") or [],
+                        "template": spec.get("template") or "",
+                        "slots": spec.get("slots") or {}})
+    return video, rows, entries, resolver.resolve(entries)
+
+
+@app.command("video-info")
+def video_info(slug: str, video_ref: str) -> None:
+    """Resolved timing for one video, without rendering anything."""
+    with db.tx() as conn:
+        video, rows, entries, tl = _video_timeline(conn, slug, video_ref)
+    starts = tl.starts()
+    typer.echo(f"{video['ref']}  {video['title']}")
+    typer.echo(f"budget {video['target_seconds']}s   "
+               f"fps {tl.to_json()['fps']}   sample rate {tl.to_json()['sampleRate']}")
+    typer.echo("")
+    typer.echo(f"{'scene':6} {'template':22} {'sens':8} {'frames':>7} "
+               f"{'secs':>7} {'silence':>8} {'start':>7} {'cues':>5}")
+    for e, s in zip(entries, tl.scenes):
+        typer.echo(f"{s.scene_ref:6} {e['template']:22} {s.timing_sensitivity:8} "
+                   f"{s.frames:7} {s.duration.seconds:7.2f} "
+                   f"{s.silence_samples / 48000:8.2f} "
+                   f"{starts[s.scene_ref].frames:7} {len(s.cues):5}"
+                   + ("  [per-span TTS: ISSUE-11]" if s.per_span_fallback else ""))
+    typer.echo("")
+    typer.echo(f"TOTAL {tl.total_frames} frames = {tl.total.seconds:.3f}s "
+               f"({tl.total.seconds - video['target_seconds']:+.2f}s vs budget)")
+    if tl.problems:
+        typer.echo("")
+        typer.echo(err("FIT PROBLEMS (§15.3)", fg=typer.colors.YELLOW, bold=True))
+        for p in tl.problems:
+            typer.echo(err(f"  {p}", fg=typer.colors.YELLOW))
+
+
+@app.command()
+def render(slug: str, video_ref: str,
+           scene: str | None = typer.Option(None, "--scene",
+                                            help="render one scene only"),
+           out: str | None = typer.Option(None, "--out"),
+           check_determinism: bool = typer.Option(
+               False, "--check-determinism",
+               help="§11.3: render each scene twice and compare digests")) -> None:
+    """Resolve, render, mux, concat and caption one video (§11.2, §11.4)."""
+    from . import assembly
+    from . import render as render_mod
+    with db.tx() as conn:
+        video, rows, entries, tl = _video_timeline(conn, slug, video_ref)
+
+    wanted = [e for e in entries if scene is None or e["ref"] == scene]
+    if not wanted:
+        typer.echo(f"no scene '{scene}' in {video_ref}", err=True)
+        raise typer.Exit(1)
+    by_ref = {s.scene_ref: s for s in tl.scenes}
+
+    chunks: list[str] = []
+    for e in wanted:
+        timing = by_ref[e["ref"]]
+        if not e["template"]:
+            typer.echo(f"{e['ref']}: no template — run `storyboard plan` first",
+                       err=True)
+            raise typer.Exit(1)
+        cues = [c.to_json() for c in timing.cues]
+
+        if check_determinism:
+            ok, a, b = render_mod.check_determinism(
+                e["ref"], e["template"], e["slots"], cues, timing.frames)
+            mark = "IDENTICAL" if ok else "MISMATCH"
+            colour = typer.colors.GREEN if ok else typer.colors.RED
+            typer.echo(err(f"  {e['ref']} determinism: {mark}  {a[:16]}",
+                           fg=colour))
+            if not ok:
+                typer.echo(err(f"    second digest {b[:16]} — §11.3 says alarm "
+                               f"on mismatch; a corrupted cache takes weeks to "
+                               f"diagnose", fg=typer.colors.RED))
+
+        r = render_mod.render_scene(e["ref"], e["template"], e["slots"], cues,
+                                    timing.frames)
+        muxed = assembly.mux_scene(r.hash, timing.audio_hash, timing.frames,
+                                   timing.padded_samples)
+        chunks.append(muxed)
+        typer.echo(f"  {e['ref']:6} {e['template']:22} {timing.frames:5} frames  "
+                   f"{'cached' if r.cached else 'rendered'}  {r.hash[:12]}")
+
+    manifest = assembly.StitchManifest(
+        scene_keys=chunks,
+        transition_keys=[t.closure(a, b) for t, (a, b) in zip(
+            assembly.default_transitions(len(chunks)), zip(chunks, chunks[1:]))],
+        encode_params=assembly.encode_params())
+
+    target = Path(out) if out else Path("var/render") / f"{slug}-{video_ref}.mp4"
+    if scene:
+        target = target.with_name(f"{target.stem}-{scene}{target.suffix}")
+    assembly.concat_and_encode(chunks, target)
+
+    measured = assembly.probe_duration(target)
+    typer.echo("")
+    typer.echo(f"manifest {manifest.hash()[:16]}   {len(chunks)} chunk(s)")
+    typer.echo(f"wrote {target}")
+    typer.echo(f"runtime {measured:.2f}s  "
+               f"(resolved {tl.total.seconds:.2f}s, "
+               f"budget {video['target_seconds']}s)")
+
+    if scene is None:
+        vtt = target.with_suffix(".vtt")
+        vtt.write_text(assembly.to_webvtt(tl), encoding="utf-8")
+        target.with_suffix(".srt").write_text(assembly.to_srt(tl),
+                                              encoding="utf-8")
+        target.with_suffix(".words.json").write_text(
+            assembly.to_word_sidecar(tl), encoding="utf-8")
+        typer.echo(f"captions {vtt.name}, {vtt.with_suffix('.srt').name}, "
+                   f"word sidecar {vtt.with_suffix('.words.json').name}")
 
 
 # ---------------------------------------------------------------------- beat
