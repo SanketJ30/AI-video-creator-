@@ -1,0 +1,22 @@
+{
+  "_comment": [
+    "Pronunciation lexicon, applied to narration BEFORE synthesis.",
+    "Versioned like a prompt: the filename carries the version and the version",
+    "enters the TTS closure hash, so changing an entry re-synthesises exactly",
+    "the scenes that contain the term and nothing else.",
+    "Substitution is whole-word and case-insensitive, applied longest-first so",
+    "a multi-word entry wins over its own prefix.",
+    "Every entry needs a reason. A lexicon nobody can audit becomes a place",
+    "where narration is quietly rewritten."
+  ],
+  "entries": [
+    {"term": "Postgres",   "say": "Post gress",      "why": "avoids 'post-grez'"},
+    {"term": "PostgreSQL", "say": "Post gress Q L",  "why": "spelled out, not 'sequel'"},
+    {"term": "xmin",       "say": "X min",           "why": "read as two tokens, not 'ex-min'"},
+    {"term": "xmax",       "say": "X max",           "why": "as above"},
+    {"term": "MVCC",       "say": "M V C C",         "why": "initialism"},
+    {"term": "SERIALIZABLE", "say": "serializable",  "why": "all-caps reads as shouting"},
+    {"term": "SELECT FOR UPDATE", "say": "select for update", "why": "as above"},
+    {"term": "SQL",        "say": "S Q L",           "why": "initialism, house style"}
+  ]
+}

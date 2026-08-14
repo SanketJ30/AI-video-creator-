@@ -39,6 +39,7 @@ class ModelPins:
     vision: str = field(default_factory=lambda: _env("MODEL_VISION", "claude-sonnet-5"))
     tts_voice: str = field(default_factory=lambda: _env("TTS_VOICE", "unpinned"))
     tts_model: str = field(default_factory=lambda: _env("TTS_MODEL", "unpinned"))
+    tts_lexicon: str = field(default_factory=lambda: _env("TTS_LEXICON", "en.v1"))
 
     def for_tier(self, tier: str) -> str:
         return {
@@ -91,6 +92,7 @@ class Settings:
                 "vision": self.models.vision,
                 "tts_model": self.models.tts_model,
                 "tts_voice": self.models.tts_voice,
+                "tts_lexicon": self.models.tts_lexicon,
             }
         }
 

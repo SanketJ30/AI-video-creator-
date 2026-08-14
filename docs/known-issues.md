@@ -423,6 +423,47 @@ before TTS rather than explained after it.
 **Prediction on record: the finished v2 runs long, by roughly 8 s, before any
 TTS-rate variance.**
 
+### Update, week 5 step 1 — the prediction was WRONG, and the reason matters
+
+Measured against the pinned voice (`piper-tts@1.6.1 / en_US-lessac-medium`,
+`noise_scale=0`), v2's nine scenes total **207.5 s against a 240 s budget —
+32.5 s UNDER**, not 8 s over.
+
+| scene | words | target | actual | wpm |
+|---|---:|---:|---:|---:|
+| s01 hook | 34 | 15 | 10.74 | 190 |
+| s02 objective | 14 | 10 | 4.93 | 170 |
+| s03 recall | 58 | 20 | 19.13 | 182 |
+| s04 present | 246 | 90 | 79.09 | 187 |
+| s05 guide | — | 52 | 48.31 | 196 |
+| s06 elicit | — | 17 | 13.55 | 195 |
+| s07 feedback | — | 19 | 17.24 | 209 |
+| s08 assess | — | 10 | 8.75 | 206 |
+| s09 retain | — | 6 | 5.76 | 208 |
+| **total** | | **239** | **207.5** | **192** |
+
+**The defect is not the script; it is the constant.** `prose.py` measures
+speaking rate against **160 wpm**. The pinned voice actually delivers **192 wpm
+averaged over the video**, ranging 170–209 by scene. So every
+`speaking_rate` warning the linter has ever emitted was measured against a rate
+this pipeline does not produce, and all four "over budget" scenes are in fact
+comfortably under.
+
+**This is a calibration defect in the gate, not a prompt defect** — the opposite
+of what ISSUE-9 originally claimed, and the original claim is left above rather
+than edited so the correction is visible.
+
+**Do not simply change 160 to 192.** Two reasons: 192 is one voice on one video
+(n=1), and §12's prosody gate wants a *target* rate for comprehension, which is
+a pedagogical number, not a measurement of whatever the current voice does. The
+right shape is probably a measured per-voice rate used for BUDGETING and a
+separate spec'd rate used for the comprehension gate. That is a decision for a
+human — recorded in `week5-decisions-needed.md` as W2.
+
+Note this makes ISSUE-10 worse, not better: the retain slot's 6 s now buys 5.76 s
+of speech with 0.24 s to spare, so there is still no room for §9.1's
+spaced-review hook.
+
 ---
 
 ## ISSUE-10 — the retain slot gets 2.5% of the video and §9.1 asks it to do two jobs · OPEN
@@ -456,3 +497,41 @@ retrieval at the *course* level, which may be the real answer).
 
 Note this interacts with ISSUE-9: retain is one of the scenes that fits, so
 taking time from it to pay for the overruns is not available.
+
+---
+
+## ISSUE-11 — span segmentation splits on an ellipsis, so spans and TTS chunks disagree · BLOCKING (worked around)
+
+`Narration.from_text` treats `...` as a sentence terminator. On v2 s05 the
+narration contains `SELECT ... FOR UPDATE`, which becomes **two spans**:
+
+```
+sp_…  "SELECT ..."
+sp_…  "FOR UPDATE on the rows they read, take a table lock, …"
+```
+
+piper does not split there, so the scene produced **9 spans but 6 TTS chunks**
+and `align.align` refused to align it — correctly. A positional guess would have
+mistimed every cue in the scene.
+
+**Three consequences, in order of seriousness:**
+
+1. **A span that is not a sentence cannot be spoken as one.** `"SELECT ..."` on
+   its own is not an utterance, and any per-span synthesis of it will sound
+   wrong.
+2. **Cues anchored to that span point at a fragment.** R3 anchoring assumes a
+   span is a meaningful unit.
+3. The caption for that span is a two-word orphan.
+
+**Root cause is in `spans.py`, which is off-limits this week.** An ellipsis is
+not a sentence boundary; neither is the `.` in `v1.2` or `Fig. 4`. The fix is a
+sentence splitter that knows about them, and it belongs with whoever owns R4.
+
+**Worked around, not fixed:** `tts.synthesize_spans` synthesises each span
+separately and concatenates when the partitions disagree, so every span still
+receives a measured start and end. The workaround is recorded on the audio
+metadata (`per_span_fallback: true`) and reported by the CLI, so a scene using
+it is visible rather than silently different from its neighbours.
+
+**Do not "fix" this by relaxing the alignment check.** The check is what caught
+it.
