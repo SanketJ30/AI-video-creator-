@@ -17,7 +17,7 @@ import typer
 
 from . import brief as brief_mod
 from . import (coursegraph, db, gagne, goldgraph, linter, prose,
-               orchestrator, termregistry, worker)
+               orchestrator, speech, termregistry, worker)
 from . import manifest as manifest_mod
 from .agents import objective_extractor
 from .config import settings
@@ -895,7 +895,13 @@ def storyboard_plan(slug: str, video_ref: str,
             # planner just wrote, not the pre-plan rows.
             rows = sw.load(conn, str(video["id"]))
             try:
-                splan = sd.design(conn, course_id, video, rows)
+                # R3: the signal designer must see the STORED span ids, not
+                # ids re-derived from text — `Narration.from_text` is not
+                # stable, so a regenerated id anchors nothing. See speech.py.
+                sd_rows = [{**r, "narration":
+                            speech.StoredNarration.from_rows(r["narration"])}
+                           for r in rows]
+                splan = sd.design(conn, course_id, video, sd_rows)
             except Escalated as e:
                 typer.echo(err(e.render(), fg=typer.colors.MAGENTA), err=True)
                 raise typer.Exit(2) from None

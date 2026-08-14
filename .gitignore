@@ -7,3 +7,7 @@ __pycache__/
 node_modules/
 out/
 *.pyc
+node_modules/
+render/out/
+var/voices/
+var/render/

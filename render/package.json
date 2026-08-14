@@ -1,0 +1,13 @@
+{
+  "name": "sequence-render",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Remotion render layer. R8: the scene spec that arrives here is renderer-agnostic; translation to React happens at this boundary and nowhere else.",
+  "scripts": { "render": "remotion render" },
+  "dependencies": {
+    "@remotion/cli": "4.0.410",
+    "remotion": "4.0.410",
+    "react": "19.2.0",
+    "react-dom": "19.2.0"
+  }
+}
