@@ -43,6 +43,9 @@ class CourseGraph:
     teaching_order: list[str] = field(default_factory=list)
     provenance: dict[str, dict] = field(default_factory=dict)
     rationales: dict[str, str] = field(default_factory=dict)
+    # ref -> speakable short form (migration 0004). The §9.1 objective slot
+    # speaks this verbatim and it is reused as that scene's title.
+    learner_facing: dict[str, str] = field(default_factory=dict)
 
     def validate(self) -> ValidationReport:
         return validate(self.objectives, items=self.items)
@@ -66,7 +69,8 @@ def teaching_order(objectives: list[Objective]) -> list[str]:
 def save(conn, course_id: str, objectives: list[Objective],
          items: list[AssessmentItem] | None = None,
          provenance: dict | None = None,
-         rationales: dict[str, str] | None = None) -> CourseGraph:
+         rationales: dict[str, str] | None = None,
+         learner_facing: dict[str, str] | None = None) -> CourseGraph:
     """Replace the course's objective graph. All-or-nothing.
 
     Deletes first: an extraction that drops an objective must actually drop it,
@@ -75,6 +79,7 @@ def save(conn, course_id: str, objectives: list[Objective],
     """
     items = items or []
     rationales = rationales or {}
+    learner_facing = learner_facing or {}
     db.execute(conn, "delete from objectives where course_id = %s", (course_id,))
 
     ids: dict[str, str] = {}
@@ -84,11 +89,12 @@ def save(conn, course_id: str, objectives: list[Objective],
             prov["rationale"] = rationales[o.ref]
         row = db.one(conn, """
             insert into objectives(course_id, ref, verb, object, condition, criterion,
-                                   bloom_level, knowledge_type, assumed, provenance)
-            values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) returning id
+                                   bloom_level, knowledge_type, assumed,
+                                   learner_facing_statement, provenance)
+            values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) returning id
         """, (course_id, o.ref, o.verb, o.object, o.condition, o.criterion,
               o.bloom_level.value, o.knowledge_type.value, o.assumed,
-              json.dumps(prov)))
+              learner_facing.get(o.ref) or None, json.dumps(prov)))
         ids[o.ref] = str(row["id"])
 
     for o in objectives:
@@ -121,7 +127,7 @@ def save(conn, course_id: str, objectives: list[Objective],
 def load(conn, course_id: str) -> CourseGraph:
     rows = db.query(conn, """
         select id, ref, verb, object, condition, criterion, bloom_level,
-               knowledge_type, assumed, provenance
+               knowledge_type, assumed, learner_facing_statement, provenance
           from objectives where course_id = %s order by ref""", (course_id,))
     by_id = {str(r["id"]): r["ref"] for r in rows}
 
@@ -160,6 +166,8 @@ def load(conn, course_id: str) -> CourseGraph:
         provenance=prov,
         rationales={ref: p.get("rationale", "") for ref, p in prov.items()
                     if p.get("rationale")},
+        learner_facing={r["ref"]: r["learner_facing_statement"] for r in rows
+                        if r["learner_facing_statement"]},
     )
 
 

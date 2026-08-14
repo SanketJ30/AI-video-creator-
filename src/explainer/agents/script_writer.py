@@ -51,7 +51,11 @@ from . import objective_extractor as ox
 AGENT = "script_writer"
 PROMPT = "script_writer"
 MAX_REPAIRS = 2
-MAX_TOKENS = 16000
+# Adaptive thinking counts against this, and nine slots of narration plus a
+# long deliberation pass overran 16000 on the first v2-prompt run — the
+# escalation was correct and the ceiling was wrong. Raised with headroom
+# rather than by trimming the prompt, since the prompt is the contract.
+MAX_TOKENS = 32000
 
 TIMING_SENSITIVITIES = ("rigid", "elastic")
 INTERACTIVITIES = ("low", "medium", "high")
@@ -100,6 +104,9 @@ class DraftScene:
     bloom_level: str
     rationale: str = ""
     model_new_terms: list[str] = field(default_factory=list)
+    # §9.1: the objective slot's line is also the scene title. Set only on
+    # that scene; None elsewhere.
+    scene_title: str | None = None
 
     @property
     def text(self) -> str:
@@ -116,6 +123,7 @@ class DraftScene:
             # Kept for the review loop: where the model's own guess disagreed
             # with the computed set is a signal about the prompt, not the scene.
             "model_claimed_new_terms": self.model_new_terms,
+            **({"scene_title": self.scene_title} if self.scene_title else {}),
         }
 
 
@@ -246,8 +254,16 @@ def parse(raw: str, form: list[gagne.SlotSpec]) -> list[dict]:
 
 def generate(conn, course_id: str | None, brief: CourseBrief, video: dict,
              objectives: list[Objective], *, client=None,
-             model: str | None = None) -> ScriptDraft:
-    """Fill one video's slot form. `video` is a row from curriculum_planner.load."""
+             model: str | None = None,
+             learner_facing: dict[str, str] | None = None,
+             position: dict | None = None) -> ScriptDraft:
+    """Fill one video's slot form. `video` is a row from curriculum_planner.load.
+
+    `position` carries the video's place in the course — ordinal, total, and
+    the next video's objectives if there is one. Without it the retain slot
+    has no way to know whether a forward reference is true, and week 3 shipped
+    a final video promising a sequel that does not exist.
+    """
     ref = prompts.load(PROMPT)
     parts = ox._sections(ref.body)
     missing = {"system", "video", "repair"} - set(parts)
@@ -267,6 +283,9 @@ def generate(conn, course_id: str | None, brief: CourseBrief, video: dict,
     model_id = model or settings().models.for_tier("mid")
     client = client or ox._client(conn, course_id)
 
+    learner_facing = learner_facing or {}
+    position = position or {}
+    is_final = bool(position) and position.get("ordinal") == position.get("total")
     video_input = {
         "title": video["title"],
         "script_type": video["script_type"],
@@ -282,6 +301,18 @@ def generate(conn, course_id: str | None, brief: CourseBrief, video: dict,
         ],
         "assumed_knowledge": [
             o.statement for o in objectives if o.assumed],
+        # §9.1: the objective slot states this VERBATIM and it is reused as
+        # that scene's title. Stored data (migration 0004), not something to
+        # re-abridge here.
+        "learner_facing_statements": {
+            o.ref: learner_facing.get(o.ref, "") for o in carried},
+        "course_position": {
+            "video_number": position.get("ordinal"),
+            "total_videos": position.get("total"),
+            "is_final_video": is_final,
+            "next_video": position.get("next"),
+            "out_of_scope": position.get("out_of_scope", ""),
+        },
         "slots": [
             {"slot": s.slot.value,
              "seconds": s.seconds,
@@ -341,7 +372,8 @@ def generate(conn, course_id: str | None, brief: CourseBrief, video: dict,
             ]
             continue
 
-        return _assemble(filled, form, carried, ref.version, model_id, attempts)
+        return _assemble(filled, form, carried, ref.version, model_id, attempts,
+                         learner_facing)
 
     raise AssertionError("unreachable")
 
@@ -362,8 +394,10 @@ def _objective_for_slot(slot: Slot, carried: list[Objective]) -> Objective:
 
 def _assemble(filled: list[dict], form: list[gagne.SlotSpec],
               carried: list[Objective], prompt_version: str, model_id: str,
-              attempts: list) -> ScriptDraft:
+              attempts: list, learner_facing: dict[str, str] | None = None
+              ) -> ScriptDraft:
     by_slot = {s.slot.value: s for s in form}
+    learner_facing = learner_facing or {}
     seen_terms: set[str] = set()
     scenes: list[DraftScene] = []
 
@@ -385,6 +419,8 @@ def _assemble(filled: list[dict], form: list[gagne.SlotSpec],
             duration_target_seconds=by_slot[f["slot"]].seconds,
             bloom_level=objective.bloom_level.value,
             rationale=f["rationale"],
+            scene_title=(learner_facing.get(objective.ref)
+                         if slot is Slot.OBJECTIVE else None),
         ))
 
     return ScriptDraft(scenes=scenes, attempts=attempts, provenance={
@@ -395,7 +431,15 @@ def _assemble(filled: list[dict], form: list[gagne.SlotSpec],
 
 
 def _call(client, model: str, system: str, messages: list[dict]):
-    resp = client.messages.create(
+    """Streamed, because MAX_TOKENS is above the SDK's non-streaming guard.
+
+    Nine slots of narration plus an adaptive-thinking pass can run past the
+    ten-minute idle window a plain request allows, and the SDK refuses rather
+    than letting the connection drop mid-generation. `get_final_message()` gives
+    the same accumulated Message a non-streaming call would have returned, so
+    nothing downstream changes.
+    """
+    with client.messages.stream(
         model=model, max_tokens=MAX_TOKENS,
         system=[{"type": "text", "text": system,
                  "cache_control": {"type": "ephemeral"}}],
@@ -403,7 +447,8 @@ def _call(client, model: str, system: str, messages: list[dict]):
         output_config={"effort": "high",
                        "format": {"type": "json_schema", "schema": OUTPUT_SCHEMA}},
         messages=messages,
-    )
+    ) as stream:
+        resp = stream.get_final_message()
     if resp.stop_reason == "refusal":
         raise RuntimeError(f"model refused: {getattr(resp, 'stop_details', None)}")
     if resp.stop_reason == "max_tokens":

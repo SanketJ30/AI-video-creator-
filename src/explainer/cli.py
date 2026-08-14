@@ -310,7 +310,8 @@ def _run_extraction(conn, course_id: str, slug: str,
 def _report_extraction(conn, course_id: str, slug: str, outcome) -> None:
     graph = coursegraph.save(conn, course_id, outcome.objectives, outcome.items,
                              provenance=outcome.provenance,
-                             rationales=outcome.rationales)
+                             rationales=outcome.rationales,
+                             learner_facing=outcome.learner_facing)
     typer.echo(coursegraph.render(graph))
     typer.echo("")
     typer.echo(f"{len(outcome.objectives)} objectives, {len(outcome.items)} assessment "
@@ -586,8 +587,11 @@ def script_generate(slug: str, video_ref: str,
         course_id, video = _script_context(conn, slug, video_ref)
         b = brief_mod.load(conn, course_id)
         graph = coursegraph.load(conn, course_id)
+        plan_rows = _course_position(conn, course_id, video)
         try:
-            draft = sw.generate(conn, course_id, b, video, graph.objectives)
+            draft = sw.generate(conn, course_id, b, video, graph.objectives,
+                                learner_facing=graph.learner_facing,
+                                position=plan_rows)
         except Escalated as e:
             typer.echo(typer.style(e.render(), fg=typer.colors.MAGENTA), err=True)
             raise typer.Exit(2) from None
@@ -614,7 +618,9 @@ def script_generate(slug: str, video_ref: str,
         sw.save(conn, str(video["id"]), draft,
                 {o.ref: i for o, i in _objective_id_map(conn, course_id)})
         scenes = sw.load(conn, str(video["id"]))
-        report = prose.check_script(scenes, technical=True)
+        report = prose.check_script(
+            scenes, technical=True,
+            is_final_video=plan_rows["ordinal"] == plan_rows["total"])
         prose.save_findings(conn, str(video["id"]), report,
                             _scene_id_map(conn, str(video["id"])))
 
@@ -631,6 +637,28 @@ def _objective_id_map(conn, course_id: str):
     ids = cp.objective_ids_for(conn, course_id)
     graph = coursegraph.load(conn, course_id)
     return [(o, ids[o.ref]) for o in graph.objectives if o.ref in ids]
+
+
+def _course_position(conn, course_id: str, video: dict) -> dict:
+    """Where this video sits in the course, for the retain slot.
+
+    Without this the final video has no way to know a forward reference is a
+    lie — which is exactly what week 3 shipped.
+    """
+    from .agents import curriculum_planner as cp
+    rows = cp.load(conn, course_id)
+    total = len(rows)
+    ordinal = video["ordinal"]
+    nxt = next((r for r in rows if r["ordinal"] == ordinal + 1), None)
+    brief_row = db.one(conn, """select brief from course_briefs
+                                where course_id = %s order by version desc limit 1""",
+                       (course_id,))
+    return {
+        "ordinal": ordinal, "total": total,
+        "next": ({"title": nxt["title"], "objective_refs": nxt["objective_refs"]}
+                 if nxt else None),
+        "out_of_scope": (brief_row or {}).get("brief", {}).get("out_of_scope", ""),
+    }
 
 
 def _scene_id_map(conn, video_id: str) -> dict:
@@ -709,7 +737,9 @@ def script_gates(slug: str, video_ref: str,
         if not scenes:
             typer.echo(f"no script for '{video_ref}'", err=True)
             raise typer.Exit(1)
-        report = prose.check_script(scenes, technical=True)
+        pos = _course_position(conn, course_id, video)
+        report = prose.check_script(scenes, technical=True,
+                                    is_final_video=pos["ordinal"] == pos["total"])
         if save:
             n = prose.save_findings(conn, str(video["id"]), report,
                                     _scene_id_map(conn, str(video["id"])))

@@ -239,6 +239,109 @@ def check_speaking_rate(scene_ref: str, text: str, budget_seconds: int,
         fix=f"cut to {allowed} words, or move the surplus into an adjacent slot")]
 
 
+# ------------------------------------- the learner-facing objective statement
+
+# §9.1 caps the objective slot at 10s. At the slowest acceptable rate (135 wpm,
+# §9.3's dense floor — the objective is the one line a learner must not miss, so
+# it is measured at the slow end, not the fast one) that is 22 words.
+LEARNER_STATEMENT_MAX_WORDS = 22
+LEARNER_STATEMENT_SLOT_SECONDS = 10
+
+
+def check_learner_facing_statement(ref: str, statement: str) -> list[str]:
+    """Validate a stored short form. Returns problems, empty if it is usable.
+
+    Returns strings rather than Findings because this runs at EXTRACTION time
+    and feeds the extractor's repair loop: the model that wrote a 30-word
+    promise can rewrite it, and a short form that cannot be spoken in its slot
+    is an extraction error rather than something the script writer inherits.
+    """
+    problems: list[str] = []
+    text = (statement or "").strip()
+    if not text:
+        return [f"objective '{ref}': learner_facing_statement is empty"]
+
+    n = len(words(text))
+    if n > LEARNER_STATEMENT_MAX_WORDS:
+        problems.append(
+            f"objective '{ref}': learner_facing_statement is {n} words; the "
+            f"§9.1 objective slot is {LEARNER_STATEMENT_SLOT_SECONDS}s, which "
+            f"holds {LEARNER_STATEMENT_MAX_WORDS} words at {WPM_DENSE_MIN} wpm. "
+            f"Cut it to {LEARNER_STATEMENT_MAX_WORDS} words: "
+            f"\"{text}\"")
+    passives = passive_sentences(text)
+    if passives:
+        problems.append(
+            f"objective '{ref}': learner_facing_statement is passive. Say what "
+            f"the learner does, not what is done: \"{passives[0]}\"")
+    if ":" in text or ";" in text:
+        problems.append(
+            f"objective '{ref}': learner_facing_statement contains a colon or "
+            f"semicolon, so it is carrying a condition or criterion. Those exist "
+            f"for alignment checking and are not spoken. Keep one clause.")
+    return problems
+
+
+# --------------------------------------------- forward references at the end
+
+# Phrasing that promises content after this video. Short on purpose — see the
+# docstring for what it misses.
+_FORWARD_REFERENCE = re.compile(
+    r"\b("
+    r"next (?:video|lesson|time|up|week|module)"
+    r"|in the next\b"
+    r"|coming up\b"
+    r"|later (?:in this course|on|we'?ll|you'?ll)"
+    r"|we'?ll (?:see|cover|look at|explore|get to)\b"
+    r"|you'?ll (?:see|learn|find out|discover) (?:how|why|what|that)\b"
+    r"|stay tuned\b"
+    r"|for now\b"
+    r"|in (?:part|video|lesson) \d"
+    r")", re.IGNORECASE)
+
+
+def forward_references(text: str) -> list[str]:
+    """Sentences that promise content after this video.
+
+    **What it catches:** the fixed phrasings above — "next video", "coming up",
+    "we'll see how", "you'll learn why", "in part 2". These cover the way a
+    script writer actually ends a scene when it thinks a sequel exists.
+
+    **What it misses:**
+      * a promise made without any of these markers — "explicit locking closes
+        that gap" states a fact and implies a sequel without saying so;
+      * a forward reference split across two sentences;
+      * a reference to a *sibling* course rather than a next video, which is
+        legitimate and would be flagged anyway if it used this phrasing.
+
+    So this is a filter, not a proof. It is blocking despite that, because on a
+    final video the phrasings it does catch are factually wrong about the course
+    — and a human reading the finding can dismiss a false positive in seconds,
+    where a shipped promise of a video that does not exist is only caught by a
+    learner.
+    """
+    return [s for s in sentences(text) if _FORWARD_REFERENCE.search(s)]
+
+
+def check_no_forward_reference(scene_ref: str, text: str, slot: str,
+                               is_final_video: bool) -> list[Finding]:
+    """§9.5's retain slot may point forward — unless there is nothing to point at."""
+    if not is_final_video or slot != "retain":
+        return []
+    hits = forward_references(text)
+    if not hits:
+        return []
+    return [Finding(
+        rule="forward_reference", severity="blocking", subject=scene_ref,
+        message=f"the retain slot of the FINAL video promises later content: "
+                + " | ".join(f'"{h}"' for h in hits[:2]),
+        measured={"matches": len(hits), "sentences": len(sentences(text))},
+        threshold={"is_final_video": True, "slot": "retain"},
+        fix="name what the learner still lacks as explicitly not covered here — "
+            "the extractor's out_of_scope is the honest version — rather than "
+            "promising a video that does not exist")]
+
+
 @dataclass
 class ProseReport:
     findings: list[Finding]
@@ -264,17 +367,22 @@ class ProseReport:
 
 
 def check_scene(scene_ref: str, text: str, budget_seconds: int, slot: str,
-                technical: bool = False) -> list[Finding]:
+                technical: bool = False, is_final_video: bool = False) -> list[Finding]:
     return (check_readability(scene_ref, text, technical)
             + check_passive(scene_ref, text)
-            + check_speaking_rate(scene_ref, text, budget_seconds, slot))
+            + check_speaking_rate(scene_ref, text, budget_seconds, slot)
+            + check_no_forward_reference(scene_ref, text, slot, is_final_video))
 
 
-def check_script(scenes: list[dict], technical: bool = False) -> ProseReport:
+def check_script(scenes: list[dict], technical: bool = False,
+                 is_final_video: bool = False) -> ProseReport:
     """Run every gate over a video's scenes.
 
     `scenes` are rows as `script_writer.load` returns them: `ref`, `text`,
     `gagne_slot`, and `pedagogy_meta.duration_target_seconds`.
+
+    `is_final_video` enables the forward-reference gate on the retain slot. It
+    is a property of the course, not of the script, so the caller supplies it.
     """
     findings: list[Finding] = []
     for s in scenes:
@@ -282,7 +390,8 @@ def check_script(scenes: list[dict], technical: bool = False) -> ProseReport:
         findings += check_scene(
             scene_ref=s["ref"], text=s.get("text") or "",
             budget_seconds=int(meta.get("duration_target_seconds") or 0),
-            slot=s.get("gagne_slot") or "", technical=technical)
+            slot=s.get("gagne_slot") or "", technical=technical,
+            is_final_video=is_final_video)
     return ProseReport(findings)
 
 

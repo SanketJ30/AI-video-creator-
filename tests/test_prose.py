@@ -205,3 +205,82 @@ def test_redundancy_is_not_among_the_gates(rule):
     rule appears here, scope has leaked."""
     assert rule in {"readability_fk", "passive_voice", "speaking_rate"}
     assert not hasattr(prose, "check_redundancy")
+
+
+# ------------------------------------- learner-facing objective statement
+
+def test_a_good_learner_facing_statement_passes():
+    assert not prose.check_learner_facing_statement(
+        "o1", "You'll work out exactly what each transaction can see, and why.")
+
+
+def test_the_week3_offender_is_rejected():
+    """The 30-word promise that caused three of week 3's four findings."""
+    problems = prose.check_learner_facing_statement("o1", (
+        "By the end of this scene, you'll predict what each statement in two "
+        "concurrent Repeatable Read transactions reads, naming the row's xmin "
+        "and xmax and when its snapshot was taken."))
+    assert problems
+    assert any("words" in p for p in problems)
+
+
+def test_a_passive_short_form_is_rejected():
+    problems = prose.check_learner_facing_statement(
+        "o1", "Write skew is predicted by the learner.")
+    assert any("passive" in p for p in problems)
+
+
+def test_a_short_form_carrying_a_criterion_is_rejected():
+    problems = prose.check_learner_facing_statement(
+        "o1", "You'll predict write skew: naming the invariant and final state.")
+    assert any("colon" in p for p in problems)
+
+
+def test_an_empty_short_form_is_rejected():
+    assert prose.check_learner_facing_statement("o1", "")
+
+
+def test_the_word_cap_matches_ten_seconds_at_the_slow_rate():
+    assert prose.LEARNER_STATEMENT_MAX_WORDS == prose.max_words_for(
+        prose.LEARNER_STATEMENT_SLOT_SECONDS, prose.WPM_DENSE_MIN)
+
+
+# ----------------------------------------------------- forward references
+
+def test_the_week3_forward_reference_is_caught():
+    text = "Next, you'll see how explicit locking closes that gap."
+    findings = prose.check_no_forward_reference("s09", text, "retain", True)
+    assert len(findings) == 1 and findings[0].severity == "blocking"
+    assert findings[0].rule == "forward_reference"
+
+
+def test_an_honest_boundary_is_not_flagged():
+    text = ("That gap is closed by explicit locking, which this course "
+            "doesn't cover.")
+    assert not prose.check_no_forward_reference("s09", text, "retain", True)
+
+
+def test_forward_references_are_allowed_when_a_next_video_exists():
+    text = "Next, you'll see how explicit locking closes that gap."
+    assert not prose.check_no_forward_reference("s09", text, "retain", False)
+
+
+def test_only_the_retain_slot_is_gated():
+    text = "Next, you'll see how explicit locking closes that gap."
+    assert not prose.check_no_forward_reference("s04", text, "present", True)
+
+
+@pytest.mark.parametrize("phrase", [
+    "Next video, we go deeper.", "Coming up: serializable.",
+    "We'll cover locking soon.", "Stay tuned for part two.",
+    "In part 2 you'll see it.", "Later in this course you'll meet SSI.",
+])
+def test_the_pattern_list_catches_the_common_phrasings(phrase):
+    assert prose.forward_references(phrase), phrase
+
+
+def test_the_documented_miss_is_real():
+    """The docstring says an implied promise with no marker slips through. If
+    that stops being true the docstring is overclaiming."""
+    assert not prose.forward_references(
+        "Explicit locking closes that gap."), "docstring claims this miss exists"

@@ -88,6 +88,27 @@ class FakeMessages:
 
         return _Resp()
 
+    def stream(self, **kwargs):
+        """Agents that stream (script_writer) go through here; the recorded
+        call shape is identical, so assertions on .calls work either way."""
+        return _FakeStream(self.create(**kwargs))
+
+
+class _FakeStream:
+    """Context manager mirroring client.messages.stream()."""
+
+    def __init__(self, resp):
+        self._resp = resp
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def get_final_message(self):
+        return self._resp
+
 
 class FakeClient:
     def __init__(self, responses: list[str]):
@@ -101,12 +122,14 @@ def _graph_json(**overrides) -> str:
              "object": "how snapshot isolation gives each transaction a consistent view",
              "condition": "", "criterion": "", "bloom_level": "understand",
              "knowledge_type": "conceptual", "assumed": True, "prerequisites": [],
-             "rationale": "the foundation the rest stands on"},
+             "rationale": "the foundation the rest stands on",
+             "learner_facing_statement": "You'll see how a snapshot freezes what a transaction reads."},
             {"ref": "o2", "verb": "describe",
              "object": "which anomalies PostgreSQL Repeatable Read prevents",
              "condition": "", "criterion": "", "bloom_level": "understand",
              "knowledge_type": "conceptual", "assumed": False, "prerequisites": ["o1"],
-             "rationale": "needed before write skew makes sense"},
+             "rationale": "needed before write skew makes sense",
+             "learner_facing_statement": "You'll name which anomalies Repeatable Read stops."},
         ],
         "assessment_items": [
             {"ref": "a1", "objective_ref": "o2", "bloom_level": "understand",
@@ -196,12 +219,13 @@ def test_diff_reports_a_bloom_level_that_is_off_by_one():
 # --------------------------------------------- parse / repair / escalate
 
 def test_parse_accepts_a_well_formed_graph():
-    objs, items, rationales, out_of_scope = ox.parse(_graph_json())
+    objs, items, rationales, out_of_scope, learner_facing = ox.parse(_graph_json())
     assert [o.ref for o in objs] == ["o1", "o2"]
     assert objs[0].assumed is True
     assert objs[1].prerequisites == ["o1"]
     assert items[0].bloom_level is Bloom.UNDERSTAND
     assert rationales["o1"]
+    assert learner_facing["o1"].startswith("You'll")
 
 
 def test_parse_collects_every_problem_at_once():
@@ -211,10 +235,12 @@ def test_parse_collects_every_problem_at_once():
         "objectives": [
             {"ref": "o1", "verb": "explain", "object": "x", "condition": "",
              "criterion": "", "bloom_level": "vibes", "knowledge_type": "conceptual",
-             "assumed": False, "prerequisites": [], "rationale": ""},
+             "assumed": False, "prerequisites": [], "rationale": "",
+             "learner_facing_statement": "You'll do the thing."},
             {"ref": "o2", "verb": "describe", "object": "y", "condition": "",
              "criterion": "", "bloom_level": "understand", "knowledge_type": "nonsense",
-             "assumed": False, "prerequisites": [], "rationale": ""},
+             "assumed": False, "prerequisites": [], "rationale": "",
+             "learner_facing_statement": "You'll do the other thing."},
         ],
         "assessment_items": [],
     })

@@ -31,7 +31,7 @@ import json
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
-from .. import escalation, prompts
+from .. import escalation, prompts, prose
 from ..brief import CourseBrief
 from ..config import settings
 from ..objectives import AssessmentItem, Bloom, KnowledgeType, Objective, ValidationReport, validate
@@ -75,10 +75,15 @@ OUTPUT_SCHEMA: dict = {
                     "assumed": {"type": "boolean"},
                     "prerequisites": {"type": "array", "items": {"type": "string"}},
                     "rationale": {"type": "string"},
+                    # v3: the speakable short form the §9.1 objective slot
+                    # says verbatim. Stored data, not a generation-time
+                    # abridgement — see migration 0004.
+                    "learner_facing_statement": {"type": "string"},
                 },
                 "required": ["ref", "verb", "object", "condition", "criterion",
                              "bloom_level", "knowledge_type", "assumed",
-                             "prerequisites", "rationale"],
+                             "prerequisites", "rationale",
+                             "learner_facing_statement"],
                 "additionalProperties": False,
             },
         },
@@ -159,6 +164,8 @@ class ExtractionOutcome:
     # honest boundary is the difference between a scoped course and a
     # silently truncated one.
     out_of_scope: str = ""
+    # ref -> the speakable short form (v3+). Empty for a v1/v2 run.
+    learner_facing: dict[str, str] = field(default_factory=dict)
 
     @property
     def raw(self) -> str:
@@ -211,7 +218,7 @@ def _require(obj, key, kind, where: str, problems: list[str]):
     return val
 
 
-def parse(raw: str) -> tuple[list[Objective], list[AssessmentItem], dict[str, str], str]:
+def parse(raw: str) -> tuple[list[Objective], list[AssessmentItem], dict[str, str], str, dict[str, str]]:
     """Model text → typed values. Raises `SchemaError` listing every problem.
 
     Every problem is collected rather than raised on the first one, so a repair
@@ -235,6 +242,7 @@ def parse(raw: str) -> tuple[list[Objective], list[AssessmentItem], dict[str, st
 
     objectives: list[Objective] = []
     rationales: dict[str, str] = {}
+    learner_facing: dict[str, str] = {}
     seen: set[str] = set()
     for i, o in enumerate(raw_objs):
         where = f"objectives[{i}]"
@@ -275,6 +283,12 @@ def parse(raw: str) -> tuple[list[Objective], list[AssessmentItem], dict[str, st
             assumed=bool(o.get("assumed", False)),
         ))
         rationales[ref.strip()] = (o.get("rationale") or "").strip()
+        short = (o.get("learner_facing_statement") or "").strip()
+        learner_facing[ref.strip()] = short
+        # Validated HERE, at extraction, so the repair loop fixes it. A
+        # short form that cannot be spoken in its 10s slot is an extraction
+        # error, not something the script writer inherits.
+        problems.extend(prose.check_learner_facing_statement(ref.strip(), short))
 
     items: list[AssessmentItem] = []
     item_refs: set[str] = set()
@@ -322,7 +336,7 @@ def parse(raw: str) -> tuple[list[Objective], list[AssessmentItem], dict[str, st
     # perfectly valid graph. Absent means "nothing declared", not "nothing left
     # out" — the distinction matters when reading an old recorded run.
     out_of_scope = str(doc.get("out_of_scope") or "").strip()
-    return objectives, items, rationales, out_of_scope
+    return objectives, items, rationales, out_of_scope, learner_facing
 
 
 # ------------------------------------------------------------- model access
@@ -458,7 +472,7 @@ def extract(conn, course_id: str | None, brief: CourseBrief, *,
         attempts.append(attempt)
 
         try:
-            objectives, items, rationales, out_of_scope = parse(raw)
+            objectives, items, rationales, out_of_scope, learner_facing = parse(raw)
         except SchemaError as e:
             attempt.error = str(e)
             if n > MAX_REPAIRS:
@@ -489,7 +503,7 @@ def extract(conn, course_id: str | None, brief: CourseBrief, *,
             objectives=objectives, items=items, report=report,
             provenance=provenance(ref.version, model_id, brief.version, n),
             attempts=attempts, rationales=rationales,
-            out_of_scope=out_of_scope)
+            out_of_scope=out_of_scope, learner_facing=learner_facing)
 
     raise AssertionError("unreachable: loop always returns or escalates")
 
