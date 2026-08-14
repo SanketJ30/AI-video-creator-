@@ -257,6 +257,19 @@ def parse(raw: str) -> tuple[list[Objective], list[AssessmentItem], dict[str, st
         if ref in seen:
             problems.append(f"{where}: duplicate ref '{ref}' — refs must be unique")
             continue
+        # The prompt reserves `a*` for assessment items and `o*` for
+        # objectives. A run emitted an objective called 'a1' whose object was
+        # the single word "placeholder" and whose own rationale read "Not an
+        # objective; ignore." — structurally valid, semantically junk, and it
+        # reached the database. Enforcing the namespace the prompt already
+        # states is not an invented rule; it is the contract.
+        if not ref.lower().startswith("o"):
+            problems.append(
+                f"{where}: objective ref '{ref}' is outside the objective "
+                f"namespace. Objectives are o1, o2, ...; a1, a2, ... are "
+                f"reserved for assessment items and must not appear in "
+                f"'objectives'.")
+            continue
         seen.add(ref)
         try:
             bloom = Bloom(str(o.get("bloom_level", "")).strip().lower())

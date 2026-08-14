@@ -288,3 +288,71 @@ runs:
       measured: the script's objective scene went from 30 words at 180 wpm with
       three gate findings to 11 words at 66 wpm with none. The remaining gold
       gap is o2's three anomaly names, now unchanged across v1, v2 and v3.
+
+  # ---------------------------------------------------------------------------
+  # DRAFTED BY CLAUDE CODE, 14 Aug 2026 — NOT yet reviewed by a human.
+  # Same caveat as v2-run1 and v3-run1: the coverage judgments are mine.
+  # ---------------------------------------------------------------------------
+  - run: v3-run2
+    prompt_version: objective_extractor@v3
+    brief_version: 2
+    model: claude-opus-5 (MODEL_FRONTIER as pinned 14 Aug 2026)
+    extracted_count: 5
+    note: >-
+      SAME PROMPT as v3-run1. The only change is the Course Brief: its
+      description now says the course covers "which concurrency anomalies
+      Repeatable Read prevents and which it does not". No anomaly is named in
+      the brief. That one clause is what closed the gap gold o2 had been open
+      on across v1, v2 and v3 — see the diagnosis in week3-findings.md. This
+      entry exists to record that the fix was a brief edit, not a prompt
+      version, which is why there is no v4.
+
+    coverage:
+      o1:
+        extracted: [o1]
+        verdict: covered_but_reframed
+        comment: >-
+          Unchanged in substance from v2-run1 and v3-run1. Gold o1 is snapshot
+          isolation marked assumed; extracted o1 teaches the same mechanism as a
+          taught apply-level objective.
+
+      o2:
+        extracted: [o2]
+        verdict: covered
+        comment: >-
+          NEWLY COVERED — this is the entry's whole point. Extracted o2's
+          criterion reads "distinguishing write skew from the dirty read,
+          non-repeatable read and phantom read that Repeatable Read does
+          prevent". All three names gold o2 asked for, in the right polarity:
+          PostgreSQL Repeatable Read PREVENTS phantom reads, which is precisely
+          the ANSI-vs-PostgreSQL conflation gold extraction_note 2 says this
+          topic was chosen to catch. The trap is now sprung and passed. Note the
+          extractor was never told the three names — the brief only scoped the
+          capability in.
+
+      o3:
+        extracted: [o2]
+        verdict: covered
+        comment: >-
+          Still covered, now by the same objective that covers gold o2. The
+          extraction folded "which anomalies RR prevents" and "predict write
+          skew" into one analyze-level objective, which is defensible under a
+          max_videos=1 budget but means gold o2 and o3 no longer have distinct
+          counterparts. A reviewer might prefer these split.
+
+      o4:
+        extracted: []
+        verdict: out_of_scope_declared
+        comment: >-
+          UNSURE, unchanged. Gold o4 is in_milestone_a false; out_of_scope names
+          SSI and the remedies. Whether "declared out of scope" counts as
+          covered is still the gold author's decision.
+
+    unmapped_extracted: [o3, o4, o5]
+    verdict: >-
+      The anomaly-taxonomy gap is closed by a brief edit with no prompt change.
+      Downstream effect: script_type moved explainer -> compare_contrast,
+      because the lead objective is now analyze-level and §9.1's Bloom table
+      puts compare/contrast there — the first time §8's second conceptual branch
+      has been exercised by real data. Two gold objectives (o2, o3) now share
+      one extracted objective, which is new and worth a human's opinion.

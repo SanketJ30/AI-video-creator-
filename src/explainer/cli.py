@@ -448,6 +448,8 @@ def objectives_diff(
     with db.tx() as conn:
         course_id = brief_mod.course_id_for(conn, slug)
         graph = coursegraph.load(conn, course_id)
+        # Read inside the transaction: the diff runs after the block closes.
+        brief_version = brief_mod.load(conn, course_id).version
     if not graph.objectives:
         typer.echo(f"no objective graph for '{slug}' — run "
                    f"`explainer objectives extract {slug}` first", err=True)
@@ -460,7 +462,8 @@ def objectives_diff(
     align_file = goldgraph.load_alignment(alignment) if alignment else None
     try:
         d = goldgraph.diff(graph.objectives, gold, alignment=align_file,
-                           prompt_version=prompt_version, run=run)
+                           prompt_version=prompt_version, run=run,
+                           brief_version=brief_version)
     except ValueError as e:
         typer.echo(typer.style(str(e), fg=typer.colors.RED), err=True)
         raise typer.Exit(2) from None

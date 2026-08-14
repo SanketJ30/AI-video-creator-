@@ -262,6 +262,11 @@ class AlignmentRun:
 
     run: str
     prompt_version: str = ""
+    # Two runs of the SAME prompt against DIFFERENT briefs are different
+    # runs, and the v3/brief-v2 experiment proved they can produce the same
+    # objective count. Without this the matcher sees two candidates, finds
+    # no unique hit, and silently falls back to the scorer.
+    brief_version: int | None = None
     extracted_count: int | None = None
     note: str = ""
     verdict: str = ""
@@ -279,7 +284,8 @@ class AlignmentFile:
     def by_run(self, run: str) -> AlignmentRun | None:
         return next((r for r in self.runs if r.run == run), None)
 
-    def match(self, prompt_version: str, count: int) -> AlignmentRun | None:
+    def match(self, prompt_version: str, count: int,
+              brief_version: int | None = None) -> AlignmentRun | None:
         """Find the entry recorded for THIS extraction.
 
         Matching on prompt version and objective count, not on "the newest
@@ -292,7 +298,16 @@ class AlignmentFile:
         stem = (prompt_version or "").split("+")[0]      # drop the body sha
         hits = [r for r in self.runs
                 if (not r.prompt_version or r.prompt_version.split("+")[0] == stem)
-                and (r.extracted_count is None or r.extracted_count == count)]
+                and (r.extracted_count is None or r.extracted_count == count)
+                and (r.brief_version is None or brief_version is None
+                     or r.brief_version == brief_version)]
+        # Prefer the entry that names THIS brief version. An older entry
+        # recorded before brief_version existed carries None and would
+        # otherwise act as a wildcard, silently scoring a run it was not
+        # written for — the exact failure this matcher exists to prevent.
+        exact = [r for r in hits if r.brief_version == brief_version]
+        if len(exact) == 1:
+            return exact[0]
         return hits[0] if len(hits) == 1 else None
 
 
@@ -312,6 +327,8 @@ def load_alignment(path: str | Path) -> AlignmentFile:
         runs.append(AlignmentRun(
             run=str(raw.get("run") or "?"),
             prompt_version=str(raw.get("prompt_version") or ""),
+            brief_version=(int(raw["brief_version"])
+                           if raw.get("brief_version") is not None else None),
             extracted_count=(int(raw["extracted_count"])
                              if raw.get("extracted_count") is not None else None),
             note=str(raw.get("note") or ""),
@@ -382,7 +399,8 @@ def diff_with_alignment(extracted: list[Objective], gold: GoldGraph,
 
 def diff(extracted: list[Objective], gold: GoldGraph,
          alignment: AlignmentFile | None = None,
-         prompt_version: str = "", run: str | None = None) -> GraphDiff:
+         prompt_version: str = "", run: str | None = None,
+         brief_version: int | None = None) -> GraphDiff:
     """Diff an extraction against the gold graph.
 
     Uses a hand alignment when the file has an entry recorded for this run;
@@ -392,7 +410,8 @@ def diff(extracted: list[Objective], gold: GoldGraph,
     """
     if alignment is not None:
         entry = (alignment.by_run(run) if run
-                 else alignment.match(prompt_version, len(extracted)))
+                 else alignment.match(prompt_version, len(extracted),
+                                      brief_version))
         if entry is not None:
             return diff_with_alignment(
                 extracted, gold, entry, f"{alignment.path.name}, run {entry.run}")

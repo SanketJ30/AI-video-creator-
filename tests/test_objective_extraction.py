@@ -454,3 +454,19 @@ def test_price_ignoring_cache_would_be_lower():
 
 def test_price_is_zero_for_an_unpriced_model():
     assert ox._price("some-model-we-have-no-rate-for", _Usage(output_tokens=99)) == 0.0
+
+
+def test_an_objective_outside_the_o_namespace_is_rejected():
+    """A real run emitted an objective 'a1' with object "placeholder" and the
+    rationale "Not an objective; ignore." It was structurally valid and reached
+    the database. The prompt reserves a* for assessment items."""
+    doc = json.loads(_graph_json())
+    doc["objectives"].append({
+        "ref": "a1", "verb": "predict", "object": "placeholder",
+        "condition": "", "criterion": "", "bloom_level": "apply",
+        "knowledge_type": "procedural", "assumed": True, "prerequisites": [],
+        "rationale": "Not an objective; ignore.",
+        "learner_facing_statement": "You'll ignore this."})
+    with pytest.raises(ox.SchemaError) as e:
+        ox.parse(json.dumps(doc))
+    assert "outside the objective namespace" in str(e.value)

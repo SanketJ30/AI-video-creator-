@@ -1,7 +1,7 @@
 # Script snapshot — mvcc-write-skew / v1
 
 Raw, unedited output of `explainer script show mvcc-write-skew v1`, captured
-14 Aug 2026 from week 3 run 2:
+14 Aug 2026 from **brief v3** — the run after the anomaly-taxonomy diagnosis:
 
     objective_extractor@v3+b5687d51   (claude-opus-5)
     curriculum_planner@v1+ad8ed399    (claude-sonnet-5)
@@ -16,82 +16,90 @@ Nothing below is edited. Two things to read deliberately rather than skim past:
 from TTS, which is week 5 — and the `sp_` ids are the span ids cues will anchor
 to (R3/R4), which is what §9.4's on-screen text gets measured against.
 
+The script_type is `compare_contrast`, not `explainer`: the lead objective is
+now analyze-level, and §9.1's Bloom table puts compare/contrast there. This is
+the first run in which §8's second conceptual branch has been exercised.
+
 ```
-v1  [explainer]  Why concurrent reads can miss each other's writes
+v1  [compare_contrast]  Snapshots, row versions, and write skew
 budget 240s  objectives o1, o2
 
- 1. s01  hook       target 15s  duration=null  elastic  obj=o1  load=medium
-      sp_2295b26d67  Session A reads a row.
-      sp_70c82b8c5d  Session B updates that same row and commits.
-      sp_5eaa606612  Session A reads it again — same query, same transaction — and sees the exact same old value.
-      sp_620c57675d  No error, no wait.
-      sp_694a37086b  Why does the row look frozen to A, even though B already committed?
+ 1. s01  hook       target 15s  duration=null  elastic  obj=o1  load=low
+      sp_97b1389464  You run a SELECT inside a transaction.
+      sp_3c9b5b0325  A moment earlier, someone else committed an update to that exact row.
+      sp_0b18f029a6  Your SELECT still shows the old value.
+      sp_375ca3b309  No error.
+      sp_c742d20ede  No warning.
+      sp_016f647f2f  What is your transaction actually looking at?
 
  2. s02  objective  target 10s  duration=null  elastic  obj=o1  load=low
-      sp_e427e4e669  You'll work out exactly what each transaction can see, and why.
+      sp_6d24448e21  You'll work out exactly which row version each transaction can see, and why.
 
  3. s03  recall     target 20s  duration=null  elastic  obj=o1  load=low
       new terms: repeatable read, snapshot
-      sp_5226399096  Remember that Postgres stamps every transaction with an increasing xid the moment it starts.
-      sp_fa5068fb94  Remember too that isolation controls what one transaction can see of concurrent work.
-      sp_901d265e18  Repeatable Read fixes that view for a transaction's entire duration using a snapshot
-      sp_224072b017  a frozen record of which transactions counted as committed at one instant.
-      [WARNING] readability_fk: Flesch-Kincaid grade 11.82 exceeds the technical limit of 11.0.
+      sp_119f9d6aa3  You already know that every transaction gets an xid, and that isolation means hiding concurrent changes from each other.
+      sp_4df21a82c5  In PostgreSQL's Repeatable Read level, that hiding works through a snapshot: a fixed list of transactions that counted as already committed.
+      sp_553425a35d  Your transaction checks everything it sees against that list.
+      [WARNING] readability_fk: Flesch-Kincaid grade 11.01 exceeds the technical limit of 11.0.
 
  4. s04  present    target 90s  duration=null  rigid  obj=o1  load=high
       new terms: xmin, xmax
-      sp_329e8ef1c8  Here's the mechanism.
-      sp_56ca949bd9  Under Repeatable Read, Postgres doesn't take that snapshot at BEGIN
-      sp_321e421195  it takes it at your transaction's first real statement, the first SELECT or UPDATE.
-      sp_e12f7823bd  Every row version in the table carries two hidden fields.
-      sp_a9ae608543  Xmin is the id of the transaction that created that version.
-      sp_10cbf954a4  Xmax is the id of the transaction that expired it
-      sp_c7436d1b54  deleted it, or replaced it with a newer version.
-      sp_e39db7e5f0  A row version is visible to you only if xmin's transaction had committed before your snapshot moment, and xmax is either empty or belongs to a transaction that hadn't committed yet at that moment.
-      sp_244b4be649  Now trace it.
-      sp_0208e0e7dc  Session A's first SELECT fires at time T1, locking in its snapshot.
-      sp_ae96754de3  It reads a row with xmin 100 — committed long before T1 — and xmax empty.
-      sp_0dcd72fddb  Visible.
-      sp_26bb675148  Session B then updates that same row: the old version gets xmax 105, a new version gets xmin 105, and B commits at T2, after T1.
-      sp_4e557fb8e2  Session A runs the same SELECT again, still inside the same transaction.
-      sp_d222249c06  Repeatable Read means it reuses the T1 snapshot, not a fresh one.
-      sp_2c0444d568  Xmax 105 committed after T1, so the old version still counts as not-yet-expired for A.
-      sp_65918d6d33  A reads xmin 100 again.
-      sp_6383850856  Same row, same value, both times, because A's whole transaction lives inside one snapshot.
+      sp_74a9b645d9  Here's how that snapshot decides what you see.
+      sp_b590ecf9ca  Postgres never overwrites a row in place.
+      sp_8870aefe10  Every row version carries two hidden fields.
+      sp_00e9eec182  Xmin holds the id of the transaction that created that version.
+      sp_251fe44d45  Xmax holds the id of the transaction that deleted or replaced it, once that happens.
+      sp_1be4821053  When transaction B updates a row, Postgres writes a brand new version with xmin set to B's xid.
+      sp_5ea3aa663f  At the same moment, it stamps the old version's xmax with that same xid.
+      sp_a12c712c22  Both versions now sit in the table.
+      sp_729cda171d  A version is visible to your transaction only if its xmin belongs to a transaction your snapshot counts as committed, and its xmax is empty, or belongs to a transaction your snapshot does not count as committed.
+      sp_ec7345e15e  Here's the detail that trips people up: your snapshot doesn't form at BEGIN.
+      sp_c4fbb7d198  It forms at your transaction's first statement.
+      sp_e8b1f9001e  So picture transaction A opening with BEGIN, then sitting idle.
+      sp_144b6fb912  Transaction B updates the row and commits while A waits.
+      sp_0017388cec  Only then does A run its first SELECT.
+      sp_dab334875e  A's snapshot forms at that instant, after B's commit, so A sees B's new version right away.
+      sp_055a6377ea  Every later statement in A reuses that exact snapshot, so from here on A is frozen in time, no matter what else commits.
 
- 5. s05  guide      target 36s  duration=null  rigid  obj=o2  load=high
-      sp_384c449de0  Picture two on-call doctors, Alice and Bob, with one rule: at least one has to stay on call.
-      sp_9634eb6937  Transaction one reads the on-call table, counts two doctors, checks the rule
-      sp_ccee603eb3  fine
-      sp_3ea2675d4e  and takes Alice off call.
-      sp_f9b5492a05  Transaction two starts before transaction one commits.
-      sp_e66df9181c  It reads the same table and still sees two doctors, because Postgres took its snapshot before Alice's row changed.
-      sp_23ec16511d  It checks the rule — also fine — and takes Bob off call.
-      sp_d6a6891c3c  Both transactions touch different rows, so nothing conflicts.
-      sp_f106edde35  Both commit.
-
- 6. s06  elicit     target 17s  duration=null  elastic  obj=o2  load=medium
-      new terms: serialization error
-      sp_2e712836c5  Both transactions commit clean — no serialization error, the abort Postgres throws when it catches a real conflict.
-      sp_6af877e819  It doesn't catch one here.
-      sp_ec4a44b3a5  Pause: how many doctors are on call once both commits land, and which rule does that quietly break?
-
- 7. s07  feedback   target 23s  duration=null  elastic  obj=o2  load=medium
+ 5. s05  guide      target 38s  duration=null  rigid  obj=o2  load=high
       new terms: write skew
-      sp_393a97b57b  Zero.
-      sp_795b389d2c  Both doctors go off call, breaking the invariant that at least one must stay on call
-      sp_4d8276dafc  a rule spanning both rows together, not one.
-      sp_96a005387f  That's write skew: each transaction reads a set of rows, checks the rule, then writes a different row.
-      sp_89a3add784  Their writes never touch, so Postgres sees no conflict.
+      sp_b53b863b21  Picture two on-call doctors.
+      sp_c78bd57be6  The rule: at least one must stay on call.
+      sp_82b447fe29  Transaction A reads the table, sees two doctors on call, and updates its own row to off-call
+      sp_7f927ffedb  that's fine, one will still be on.
+      sp_7256b7fd2b  Transaction B, in its own Repeatable Read transaction, read the same two-doctors count before A committed.
+      sp_a1b4141100  B's snapshot never saw A's change, so B also updates its own row to off-call.
+      sp_3a3515058e  Both commit.
+      sp_6b160e4c46  Neither touched the row the other wrote, so nothing conflicts.
+      sp_67ecaf1f58  But now zero doctors are on call.
+      sp_1a9baf4406  That's write skew: each read was true, each write looked safe alone, but together they break the rule.
+      [WARNING] speaking_rate: 105 words need 39.4s at 160 wpm but the guide slot budgets 38s (4% over; 101 words fit).
 
- 8. s08  assess     target 18s  duration=null  elastic  obj=o2  load=medium
-      sp_df40d1b436  Try this one yourself.
-      sp_2badad709f  Two transactions each read a shared inventory count of 10 units, both confirm that's enough to reserve their own separate order of 6 units, and both then commit.
-      sp_9c421e99a7  Does this produce write skew, and which invariant breaks?
+ 6. s06  elicit     target 18s  duration=null  elastic  obj=o2  load=medium
+      sp_4f0161ae3a  Now suppose two transactions each check a shared balance, confirm it covers a withdrawal, and then both update the very same account row.
+      sp_f17e7a2535  Before I tell you: do both commit, producing write skew — or does Postgres abort one of them?
+      sp_db81dd9288  Think about which row each transaction actually writes to.
+      [WARNING] speaking_rate: 49 words need 18.4s at 160 wpm but the elicit slot budgets 18s (2% over; 48 words fit).
 
- 9. s09  retain     target 12s  duration=null  elastic  obj=o2  load=low
-      sp_fbe77af772  Pause and put it in your own words: what makes a snapshot fix what a transaction sees, and why can two rule-respecting transactions still break a rule that spans rows they never both touched?
-      [WARNING] readability_fk: Flesch-Kincaid grade 13.98 exceeds the technical limit of 11.0.
+ 7. s07  feedback   target 24s  duration=null  rigid  obj=o2  load=high
+      new terms: write-write conflict, serialization failure
+      sp_f335aadeed  Postgres aborts one of them.
+      sp_cc0885ebea  Both transactions target the exact same row — that's a write-write conflict.
+      sp_cf757a79db  The second one to update it hits a version that changed after its snapshot formed, so Repeatable Read throws a serialization failure, and it must retry.
+      sp_44003d90b8  A and B, though, wrote two different rows, so Postgres never saw a conflict there.
+      sp_dcd426799d  Write skew slips through because the two transactions never touch the same row
+      sp_3806f941df  only the shared rule breaks.
+      [WARNING] speaking_rate: 75 words need 28.1s at 160 wpm but the feedback slot budgets 24s (17% over; 64 words fit).
 
-9 scenes, 49 spans, 2 findings
+ 8. s08  assess     target 15s  duration=null  elastic  obj=o2  load=medium
+      sp_bb48a0e581  Here's one for you: two transactions each read expense rows, confirm the total is under budget, then each update a different row, adding an expense that pushes the true total over.
+      sp_85b076dcf6  Neither errors.
+      sp_718ddf755d  Name the anomaly, and the invariant it breaks.
+      [WARNING] speaking_rate: 41 words need 15.4s at 160 wpm but the assess slot budgets 15s (2% over; 40 words fit).
+
+ 9. s09  retain     target 10s  duration=null  elastic  obj=o2  load=low
+      sp_f2f0643302  Pause and say back, in your own words, how xmin, xmax, and snapshot timing decide what you see
+      sp_ebc8d72755  and what makes write skew invisible to the engine.
+
+9 scenes, 50 spans, 5 findings
 ```
