@@ -98,8 +98,14 @@ OUTPUT_SCHEMA: dict = {
                 "additionalProperties": False,
             },
         },
+        # Prompt v2 asks the model to declare what the video budget forced it to
+        # leave out rather than silently expanding the graph. The field has to
+        # exist here or `additionalProperties: false` forbids the very thing the
+        # prompt instructs — the schema and the prompt are one contract, and a
+        # prompt that asks for a key the schema rejects is a bug in this file.
+        "out_of_scope": {"type": "string"},
     },
-    "required": ["objectives", "assessment_items"],
+    "required": ["objectives", "assessment_items", "out_of_scope"],
     "additionalProperties": False,
 }
 
@@ -137,6 +143,11 @@ class ExtractionOutcome:
     provenance: dict
     attempts: list[Attempt] = field(default_factory=list)
     rationales: dict[str, str] = field(default_factory=dict)
+    # What the model says the video budget forced it to leave out (prompt v2).
+    # Empty on a v1 run. This is a first-class output, not a footnote: an
+    # honest boundary is the difference between a scoped course and a
+    # silently truncated one.
+    out_of_scope: str = ""
 
     @property
     def raw(self) -> str:
@@ -189,7 +200,7 @@ def _require(obj, key, kind, where: str, problems: list[str]):
     return val
 
 
-def parse(raw: str) -> tuple[list[Objective], list[AssessmentItem], dict[str, str]]:
+def parse(raw: str) -> tuple[list[Objective], list[AssessmentItem], dict[str, str], str]:
     """Model text → typed values. Raises `SchemaError` listing every problem.
 
     Every problem is collected rather than raised on the first one, so a repair
@@ -296,7 +307,11 @@ def parse(raw: str) -> tuple[list[Objective], list[AssessmentItem], dict[str, st
 
     if problems:
         raise SchemaError(problems)
-    return objectives, items, rationales
+    # Optional on the way in: a v1 response has no `out_of_scope` and is still a
+    # perfectly valid graph. Absent means "nothing declared", not "nothing left
+    # out" — the distinction matters when reading an old recorded run.
+    out_of_scope = str(doc.get("out_of_scope") or "").strip()
+    return objectives, items, rationales, out_of_scope
 
 
 # ------------------------------------------------------------- model access
@@ -411,7 +426,7 @@ def extract(conn, course_id: str | None, brief: CourseBrief, *,
         attempts.append(attempt)
 
         try:
-            objectives, items, rationales = parse(raw)
+            objectives, items, rationales, out_of_scope = parse(raw)
         except SchemaError as e:
             attempt.error = str(e)
             if n > MAX_REPAIRS:
@@ -441,7 +456,8 @@ def extract(conn, course_id: str | None, brief: CourseBrief, *,
         return ExtractionOutcome(
             objectives=objectives, items=items, report=report,
             provenance=provenance(ref.version, model_id, brief.version, n),
-            attempts=attempts, rationales=rationales)
+            attempts=attempts, rationales=rationales,
+            out_of_scope=out_of_scope)
 
     raise AssertionError("unreachable: loop always returns or escalates")
 

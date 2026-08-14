@@ -1,7 +1,14 @@
 # Hand-authored gold standard for objective extraction (Milestone A).
 # Authored by Sanket, 14 Aug 2026. NOT generated. Do not let an agent edit this.
+#
+# v2 (14 Aug): assessment items added; o4 wording corrected from "detects a
+# rw-dependency cycle" to the dangerous-structure formulation — PostgreSQL SSI
+# detects two consecutive rw-antidependency edges through a pivot transaction,
+# which is necessary but not sufficient for a true cycle, which is why SSI
+# produces false-positive serialization failures. Confirmed independently by the
+# extractor's own o9/a7 output, which reached the pivot framing unprompted.
 topic: MVCC and the write skew anomaly under Repeatable Read isolation
-engine: postgresql            # o2/o4 are engine-specific — see note below
+engine: postgresql            # o2/o3/o4 are engine-specific — see notes below
 
 audience:
   level: intermediate
@@ -10,6 +17,10 @@ audience:
     - SQL SELECT and UPDATE
     - transaction ids (xid)
   native_language_ratio: 0.0
+
+# Milestone A is ONE video. o1 is assumed, o2+o3 are the video, o4 is video 2.
+max_videos: 1
+target_seconds_per_video: 300
 
 objectives:
   - ref: o1
@@ -23,6 +34,8 @@ objectives:
   - ref: o2
     verb: describe
     object: which anomalies PostgreSQL Repeatable Read prevents, and how
+    condition: ""
+    criterion: naming dirty read, non-repeatable read and phantom read, and attributing prevention to the transaction-scoped snapshot rather than per-statement snapshots
     bloom_level: understand
     knowledge_type: conceptual
     prerequisites: [o1]
@@ -37,20 +50,75 @@ objectives:
     prerequisites: [o2]
 
   - ref: o4
-    verb: evaluate               # video 2 — out of scope for Milestone A
-    object: whether SSI will abort a given transaction pair, and which one
+    verb: evaluate
+    object: whether SSI will abort a given transaction pair, and which transaction it aborts
+    condition: given a trace of two concurrent SERIALIZABLE transactions
+    criterion: identifying the two rw-antidependency edges and the pivot transaction, and naming the 40001 serialization failure the application receives
     bloom_level: evaluate
     knowledge_type: procedural
     prerequisites: [o3]
-    in_milestone_a: false
+    in_milestone_a: false      # video 2 — the continuity demo for Wedge A
 
-assessment_items: []           # TODO Sanket — see below
+# Both items adapted from the extractor's own run-2 output (a4, a5) and reviewed
+# by hand. They are the standard the generator's items get measured against.
+assessment_items:
+  - ref: a1
+    objective_ref: o2
+    bloom_level: understand
+    kind: short
+    stem: >-
+      Transaction A runs BEGIN, then SELECT sum(balance) FROM accounts, then
+      waits. Transaction B updates one row and commits. Transaction A now runs
+      the same SELECT again. Give the second result under READ COMMITTED and
+      under REPEATABLE READ, and explain the difference purely in terms of when
+      each isolation level takes its snapshot.
+
+  - ref: a2
+    objective_ref: o3
+    bloom_level: apply
+    kind: predict
+    stem: >-
+      Table oncall has two rows: (alice, true) and (bob, true). The application
+      rule is that at least one doctor must remain on call. Two REPEATABLE READ
+      transactions start at the same moment. Each runs
+      SELECT count(*) FROM oncall WHERE on_call = true and gets 2. One then runs
+      UPDATE oncall SET on_call = false WHERE name = 'alice' while the other runs
+      UPDATE oncall SET on_call = false WHERE name = 'bob'. Both commit. Predict
+      the outcome of each statement and what the table contains at the end. Name
+      the invariant that is broken, and explain why no serial ordering of these
+      two transactions could produce that final state.
+
+  - ref: a3
+    objective_ref: o4
+    bloom_level: evaluate
+    kind: task
+    stem: >-
+      Take the two on-call transactions from a2 and re-run them under
+      SERIALIZABLE instead of REPEATABLE READ. Draw the read/write dependency
+      edges between T1 and T2, labelling each edge with which transaction read
+      the data and which one wrote it afterwards. Identify the pivot transaction.
+      Say which transaction PostgreSQL aborts, what error the application
+      receives, and whether an application without retry logic would notice.
 
 extraction_notes:
-  - The dependency chain o1 -> o2 -> o3 -> o4 is strict. An extractor that
-    flattens it has failed.
-  - PostgreSQL Repeatable Read is snapshot isolation and prevents phantom reads.
-    The ANSI SQL standard's Repeatable Read permits them. An extractor that
-    conflates the two has made the error this topic was chosen to catch.
-  - Write skew is NOT prevented by Repeatable Read. Any objective or claim
-    stating otherwise is a blocking factual error.
+  - >-
+      The dependency chain o1 -> o2 -> o3 -> o4 is strict. An extractor that
+      flattens it has failed.
+  - >-
+      PostgreSQL Repeatable Read is snapshot isolation and prevents phantom reads.
+      The ANSI SQL standard's Repeatable Read permits them. An extractor that
+      conflates the two has made the error this topic was chosen to catch.
+  - >-
+      Write skew is NOT prevented by Repeatable Read. Any objective or claim
+      stating otherwise is a blocking factual error.
+  - >-
+      Repeatable Read DOES abort a concurrent update to the same row, with a
+      could-not-serialize error. Learners routinely generalise that to write skew,
+      where the transactions touch different rows and no error is raised. An
+      extractor that surfaces this contrast has done something better than the
+      gold graph asks for. Note it, do not penalise it.
+  - >-
+      Granularity is the known failure mode as of prompt v1. The model emitted 10
+      fine-grained objectives against these 4, reproducibly across two runs. The
+      objectives were individually sound but the size was wrong, so v2 of the
+      prompt adds the video-scoped granularity contract.

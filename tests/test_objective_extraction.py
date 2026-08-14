@@ -196,7 +196,7 @@ def test_diff_reports_a_bloom_level_that_is_off_by_one():
 # --------------------------------------------- parse / repair / escalate
 
 def test_parse_accepts_a_well_formed_graph():
-    objs, items, rationales = ox.parse(_graph_json())
+    objs, items, rationales, out_of_scope = ox.parse(_graph_json())
     assert [o.ref for o in objs] == ["o1", "o2"]
     assert objs[0].assumed is True
     assert objs[1].prerequisites == ["o1"]
@@ -297,8 +297,9 @@ def test_the_brief_reaches_the_model_verbatim():
 # --------------------------------------------------------------- live run
 
 live = pytest.mark.skipif(
-    not os.getenv("ANTHROPIC_API_KEY"),
-    reason="needs ANTHROPIC_API_KEY — the live extraction costs a real model call",
+    not (os.getenv("ANTHROPIC_API_KEY") and os.getenv("EXPLAINER_LIVE") == "1"),
+    reason="live extraction costs a real model call: set EXPLAINER_LIVE=1 "
+           "(and ANTHROPIC_API_KEY) to opt in. `make test` must never bill.",
 )
 
 
@@ -317,3 +318,77 @@ def test_extraction_matches_the_gold_graph_within_tolerance():
         f"the {' -> '.join(CHAIN)} chain is not intact as direct edges\n{d.render()}")
     assert d.max_bloom_distance <= 1, (
         f"a Bloom level is off by more than one\n{d.render()}")
+
+
+# ------------------------------------------------- hand alignment wiring
+
+ALIGN_PATH = Path(__file__).parent / "gold" / "mvcc_alignment.yaml"
+
+
+def _obj(ref, verb, text, bloom, ktype, prereqs=(), assumed=False):
+    from explainer.objectives import KnowledgeType, Objective
+    return Objective(ref=ref, verb=verb, object=text, bloom_level=bloom,
+                     knowledge_type=KnowledgeType(ktype), prerequisites=list(prereqs),
+                     assumed=assumed)
+
+
+def test_alignment_file_parses():
+    a = goldgraph.load_alignment(ALIGN_PATH)
+    v1 = a.by_run("v1-run2")
+    assert v1 is not None
+    assert v1.coverage["o1"] == ["o1", "o2", "o3", "o4"]
+    assert v1.coverage["o3"] == ["o7", "o8"]
+    assert v1.coverage_notes["o2"], "the human's comment is part of the record"
+
+
+def test_diff_without_an_alignment_is_labelled_approximate():
+    gold = goldgraph.load_gold(GOLD_PATH)
+    d = goldgraph.diff(gold.objectives, gold)
+    assert d.approximate and d.method == "approximate"
+    assert "APPROXIMATE" in d.render()
+
+
+def test_an_alignment_for_a_different_run_does_not_silently_apply():
+    """The stale-alignment guard: a v1 mapping must not score a v2 extraction.
+    Same class of error as a stale cache hit."""
+    gold = goldgraph.load_gold(GOLD_PATH)
+    a = goldgraph.load_alignment(ALIGN_PATH)
+    d = goldgraph.diff(gold.objectives, gold, alignment=a,
+                       prompt_version="objective_extractor@v2+deadbeef")
+    assert d.approximate, "a v1 entry must not be reused for a v2 run"
+
+
+def test_hand_alignment_reports_coverage_instead_of_one_to_one_misses():
+    """The whole point: 4 gold objectives split across 10 extracted ones are
+    covered, not missing — which the scorer cannot express."""
+    from explainer.objectives import Bloom as B
+    gold = goldgraph.load_gold(GOLD_PATH)
+    extracted = [
+        _obj("o1", "state", "xid semantics", B.REMEMBER, "factual", assumed=True),
+        _obj("o2", "write", "transaction blocks", B.APPLY, "procedural", assumed=True),
+        _obj("o3", "explain", "tuple versioning", B.UNDERSTAND, "conceptual", ["o1"]),
+        _obj("o4", "identify", "snapshot parts", B.REMEMBER, "factual", ["o3"]),
+        _obj("o5", "predict", "which version is visible", B.APPLY, "procedural", ["o4"]),
+        _obj("o6", "contrast", "snapshot timing RC vs RR", B.ANALYZE, "conceptual", ["o5"]),
+        _obj("o7", "predict", "whether write skew occurs", B.APPLY, "procedural", ["o6"]),
+        _obj("o8", "differentiate", "same-row conflict", B.ANALYZE, "conceptual", ["o7"]),
+        _obj("o9", "trace", "rw dependencies under SSI", B.ANALYZE, "conceptual", ["o7"]),
+        _obj("o10", "recommend", "a remedy", B.EVALUATE, "procedural", ["o8", "o9"]),
+    ]
+    a = goldgraph.load_alignment(ALIGN_PATH)
+    d = goldgraph.diff(extracted, gold, alignment=a,
+                       prompt_version="objective_extractor@v1+03930968")
+    assert d.method == "hand", "10 objectives on v1 must select the v1-run2 entry"
+    assert not d.missing, "every gold objective is covered by some extracted group"
+    assert not d.extra
+    assert "HAND" in d.render()
+
+
+def test_a_stale_alignment_raises_rather_than_scoring_around_it():
+    gold = goldgraph.load_gold(GOLD_PATH)
+    a = goldgraph.load_alignment(ALIGN_PATH)
+    entry = a.by_run("v1-run2")
+    with pytest.raises(ValueError) as e:
+        goldgraph.diff_with_alignment([_obj("zz", "explain", "x", Bloom.UNDERSTAND,
+                                            "conceptual")], gold, entry, "test")
+    assert "not in this graph" in str(e.value)

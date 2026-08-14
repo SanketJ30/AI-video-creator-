@@ -164,6 +164,20 @@ class GraphDiff:
     extra_edges: list[tuple[str, str]] = field(default_factory=list)    # gold refs
     assumed_mismatch: list[str] = field(default_factory=list)
 
+    # How the alignment was arrived at. "hand" means a human wrote it down for
+    # THIS run; "approximate" means the content scorer guessed. The label is
+    # printed on every diff because the two carry completely different
+    # authority, and a reader who cannot tell them apart will trust the guess.
+    method: str = "approximate"
+    method_detail: str = "content scorer, Jaccard over token sets"
+    # gold ref -> extracted refs that together cover it (hand alignment only).
+    coverage: dict[str, list[str]] = field(default_factory=dict)
+    coverage_notes: dict[str, str] = field(default_factory=dict)
+
+    @property
+    def approximate(self) -> bool:
+        return self.method != "hand"
+
     @property
     def max_bloom_distance(self) -> int:
         return max((m.distance for m in self.bloom), default=0)
@@ -175,18 +189,35 @@ class GraphDiff:
         chain is a failure, and transitivity would let A->C plus B->C pass as
         A->B->C.
         """
-        return all((chain[i], chain[i + 1]) not in set(self.missing_edges)
-                   and chain[i] in self.mapping and chain[i + 1] in self.mapping
+        present = self.coverage if self.method == "hand" else self.mapping
+        missing = set(self.missing_edges)
+        return all((chain[i], chain[i + 1]) not in missing
+                   and present.get(chain[i]) and present.get(chain[i + 1])
                    for i in range(len(chain) - 1))
 
     def render(self) -> str:
-        out = ["alignment (gold <- extracted, content score):"]
-        for gref, eref, score in sorted(self.scores):
-            out.append(f"    {gref:<5} <- {eref:<5} {score:.2f}")
-        for ref in self.missing:
-            out.append(f"    {ref:<5} <- (nothing)   MISSING")
-        for ref in self.extra:
-            out.append(f"    {'-':<5} <- {ref:<5} EXTRA")
+        if self.method == "hand":
+            out = [f"alignment: HAND ({self.method_detail})",
+                   "  gold <- extracted refs that together cover it:"]
+            for gref in sorted(self.coverage):
+                if not self.coverage[gref]:
+                    continue          # shown once, below, as MISSING
+                out.append(f"    {gref:<5} <- {', '.join(self.coverage[gref])}")
+            for ref in self.missing:
+                out.append(f"    {ref:<5} <- (nothing)   MISSING")
+            if self.extra:
+                out.append(f"    unmapped extracted: {', '.join(self.extra)}")
+        else:
+            out = [f"alignment: APPROXIMATE ({self.method_detail})",
+                   "  treat these pairings as a guess, not a verdict — supply",
+                   "  --alignment with a hand-authored file to remove the guess.",
+                   "  gold <- extracted, content score:"]
+            for gref, eref, score in sorted(self.scores):
+                out.append(f"    {gref:<5} <- {eref:<5} {score:.2f}")
+            for ref in self.missing:
+                out.append(f"    {ref:<5} <- (nothing)   MISSING")
+            for ref in self.extra:
+                out.append(f"    {'-':<5} <- {ref:<5} EXTRA")
         if self.bloom:
             out.append("bloom levels:")
             for m in self.bloom:
@@ -207,16 +238,165 @@ class GraphDiff:
             out.append("extra prerequisite edges (gold refs):")
             for a, b in self.extra_edges:
                 out.append(f"    {a} -> {b}")
+        if self.coverage_notes:
+            out.append("coverage notes (from the hand alignment):")
+            for gref in sorted(self.coverage_notes):
+                note = " ".join(self.coverage_notes[gref].split())
+                out.append(f"    {gref}: {note}")
         clean = not (self.missing or self.extra or self.bloom or self.missing_edges
                      or self.extra_edges)
         out.append("verdict: matches the gold graph" if clean
                    else f"verdict: {len(self.missing)} missing, {len(self.extra)} extra, "
                         f"{len(self.bloom)} bloom, "
                         f"{len(self.missing_edges)} missing edges")
+        if self.approximate:
+            out.append("         (approximate — no hand alignment for this run)")
         return "\n".join(out)
 
 
-def diff(extracted: list[Objective], gold: GoldGraph) -> GraphDiff:
+# ------------------------------------------------- hand-authored alignments
+
+@dataclass
+class AlignmentRun:
+    """One recorded run's hand alignment. Immutable once written."""
+
+    run: str
+    prompt_version: str = ""
+    extracted_count: int | None = None
+    note: str = ""
+    verdict: str = ""
+    coverage: dict[str, list[str]] = field(default_factory=dict)
+    coverage_notes: dict[str, str] = field(default_factory=dict)
+    unmapped_extracted: list[str] = field(default_factory=list)
+
+
+@dataclass
+class AlignmentFile:
+    path: Path
+    gold_file: str = ""
+    runs: list[AlignmentRun] = field(default_factory=list)
+
+    def by_run(self, run: str) -> AlignmentRun | None:
+        return next((r for r in self.runs if r.run == run), None)
+
+    def match(self, prompt_version: str, count: int) -> AlignmentRun | None:
+        """Find the entry recorded for THIS extraction.
+
+        Matching on prompt version and objective count, not on "the newest
+        entry", is the guard against the stale-alignment failure: reusing a v1
+        alignment to score a v2 extraction is the same class of error as a stale
+        cache hit, and it would silently flatter whichever run it was written
+        for. A near-miss is not a match — it falls back to the scorer and says
+        so.
+        """
+        stem = (prompt_version or "").split("+")[0]      # drop the body sha
+        hits = [r for r in self.runs
+                if (not r.prompt_version or r.prompt_version.split("+")[0] == stem)
+                and (r.extracted_count is None or r.extracted_count == count)]
+        return hits[0] if len(hits) == 1 else None
+
+
+def load_alignment(path: str | Path) -> AlignmentFile:
+    p = Path(path)
+    doc = yaml.safe_load(p.read_text(encoding="utf-8")) or {}
+    runs = []
+    for raw in doc.get("runs") or []:
+        cov, notes = {}, {}
+        for gref, entry in (raw.get("coverage") or {}).items():
+            if isinstance(entry, dict):
+                cov[str(gref)] = [str(x) for x in (entry.get("extracted") or [])]
+                if entry.get("comment"):
+                    notes[str(gref)] = str(entry["comment"])
+            else:                                   # bare list shorthand
+                cov[str(gref)] = [str(x) for x in (entry or [])]
+        runs.append(AlignmentRun(
+            run=str(raw.get("run") or "?"),
+            prompt_version=str(raw.get("prompt_version") or ""),
+            extracted_count=(int(raw["extracted_count"])
+                             if raw.get("extracted_count") is not None else None),
+            note=str(raw.get("note") or ""),
+            verdict=str(raw.get("verdict") or ""),
+            coverage=cov, coverage_notes=notes,
+            unmapped_extracted=[str(x) for x in (raw.get("unmapped_extracted") or [])],
+        ))
+    return AlignmentFile(path=p, gold_file=str(doc.get("gold_file") or ""), runs=runs)
+
+
+def diff_with_alignment(extracted: list[Objective], gold: GoldGraph,
+                        run: AlignmentRun, source: str) -> GraphDiff:
+    """Diff using a human's coverage mapping instead of the scorer.
+
+    Coverage is one-to-many by design: the v1 finding was that the extractor
+    splits one gold objective across several, which a 1:1 matcher can only
+    report as "missing". Here a gold objective is covered when the extracted set
+    collectively teaches it, and the checks below are group-shaped to match.
+    """
+    ext = {o.ref: o for o in extracted}
+    gld = gold.by_ref()
+    d = GraphDiff(method="hand", method_detail=source,
+                  coverage={g: list(v) for g, v in run.coverage.items()},
+                  coverage_notes=dict(run.coverage_notes))
+
+    # Refs a human named that no longer exist are a stale alignment, not a
+    # finding about the model — say so loudly rather than scoring around it.
+    unknown = sorted({r for refs in run.coverage.values() for r in refs} - set(ext))
+    if unknown:
+        raise ValueError(
+            f"alignment {source} names extracted refs that are not in this graph: "
+            f"{unknown}. It was written for a different run — re-record it, or "
+            f"drop --alignment to fall back to the approximate scorer.")
+
+    covered = {g: [ext[r] for r in refs] for g, refs in run.coverage.items() if refs}
+    d.missing = sorted(g.ref for g in gold.objectives if not covered.get(g.ref))
+    mapped = {r for refs in run.coverage.values() for r in refs}
+    d.extra = sorted(set(ext) - mapped)
+
+    for gref in sorted(covered):
+        if gref not in gld:
+            continue
+        g, group = gld[gref], covered[gref]
+        # A group satisfies the gold Bloom level if ANY member reaches it —
+        # the others are the sub-steps the gold folded into its criterion.
+        if not any(e.bloom_level is g.bloom_level for e in group):
+            closest = min(group, key=lambda e: abs(e.bloom_level.rank - g.bloom_level.rank))
+            d.bloom.append(BloomMismatch(gref, closest.ref, g.bloom_level,
+                                         closest.bloom_level))
+        if not any(e.knowledge_type is g.knowledge_type for e in group):
+            d.knowledge.append((gref, g.knowledge_type.value,
+                                "/".join(sorted({e.knowledge_type.value for e in group}))))
+        if g.assumed and not any(e.assumed for e in group):
+            d.assumed_mismatch.append(f"{gref} (gold=assumed, no member assumed)")
+
+    # An edge between two gold objectives survives if any member of the earlier
+    # group is a direct prerequisite of any member of the later one. Direct, not
+    # transitive — a flattened chain must still fail (gold note 1).
+    for a, b in sorted(gold.edges()):
+        if not covered.get(a) or not covered.get(b):
+            continue
+        a_refs = {e.ref for e in covered[a]}
+        if any(p in a_refs for e in covered[b] for p in e.prerequisites):
+            continue
+        d.missing_edges.append((a, b))
+    return d
+
+
+def diff(extracted: list[Objective], gold: GoldGraph,
+         alignment: AlignmentFile | None = None,
+         prompt_version: str = "", run: str | None = None) -> GraphDiff:
+    """Diff an extraction against the gold graph.
+
+    Uses a hand alignment when the file has an entry recorded for this run;
+    otherwise falls back to the content scorer and labels the result
+    approximate. It never silently picks an entry that was written for a
+    different run.
+    """
+    if alignment is not None:
+        entry = (alignment.by_run(run) if run
+                 else alignment.match(prompt_version, len(extracted)))
+        if entry is not None:
+            return diff_with_alignment(
+                extracted, gold, entry, f"{alignment.path.name}, run {entry.run}")
+
     mapping, scores = align(extracted, gold.objectives)
     ext = {o.ref: o for o in extracted}
     gld = gold.by_ref()

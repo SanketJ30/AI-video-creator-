@@ -36,7 +36,11 @@ from . import db
 # breaks: these values reach the model, the renderer and the cost model.
 
 DEFAULT_AUDIENCE_LEVEL = "intermediate"       # §2 D1
-DEFAULT_TARGET_SECONDS = 240                  # 4 minutes — the §15 latency and
+DEFAULT_TARGET_SECONDS = 240
+# One video per objective pair (§5.3). The extractor uses this to size an
+# objective: without it, prompt v1 reproducibly emitted ~10 scene-sized
+# objectives where the gold graph has 4 video-sized ones.
+DEFAULT_MAX_VIDEOS = 1                  # 4 minutes — the §15 latency and
                                               # cost budget is built on this
 DEFAULT_LOCALE = "en"                         # D7 — ship EN only, keep the field
 DEFAULT_TONE = ("plain, concrete and unhurried; explain the mechanism rather "
@@ -84,6 +88,7 @@ class CourseBrief:
     source_material: tuple[str, ...] = ()
     audience: Audience = field(default_factory=Audience)
     target_seconds_per_video: int = DEFAULT_TARGET_SECONDS
+    max_videos: int = DEFAULT_MAX_VIDEOS
     locales: tuple[str, ...] = (DEFAULT_LOCALE,)
     brand_kit_ref: str | None = None
     tone: str = DEFAULT_TONE
@@ -135,6 +140,7 @@ class CourseBrief:
             audience=Audience.from_json(obj.get("audience")),
             target_seconds_per_video=int(
                 obj.get("target_seconds_per_video") or DEFAULT_TARGET_SECONDS),
+            max_videos=int(obj.get("max_videos") or DEFAULT_MAX_VIDEOS),
             locales=tuple(obj.get("locales") or (DEFAULT_LOCALE,)),
             brand_kit_ref=obj.get("brand_kit_ref"),
             tone=obj.get("tone") or DEFAULT_TONE,

@@ -1,0 +1,191 @@
+# Hand-authored alignment between the gold graph and a recorded extraction run.
+# Authored 14 Aug 2026, reviewed against run 2 of prompt v1.
+#
+# WHY THIS FILE EXISTS
+#
+# goldgraph.align() scores similarity with Jaccard over token sets. On this gold
+# set that does not work: a 4-token gold objective compared against a 25-token
+# extracted one scores low no matter how well they correspond. Run 2 matched
+# exactly 1 of 4 gold objectives, at 0.41 against a 0.22 threshold, and Claude
+# Code's own read was that it "wouldn't trust it to arbitrate anything yet."
+# Correct read.
+#
+# The fix is not a cleverer scorer — every automatic matcher will have some
+# version of this problem, and putting a model call inside a deterministic check
+# would break the linter's credibility (CLAUDE.md, deterministic checks stay
+# deterministic). For a gold set of four objectives, a human aligns it once and
+# the mapping is stored. Five minutes, exact, auditable.
+#
+# HOW TO USE
+#
+# `explainer objectives diff <course> --against tests/gold/mvcc_write_skew.yaml
+#  --alignment tests/gold/mvcc_alignment.yaml`
+#
+# When an alignment file is supplied for the recorded run, the diff uses it
+# instead of scoring. For any run NOT recorded here, fall back to the scorer and
+# label the output as approximate — never silently.
+
+gold_file: tests/gold/mvcc_write_skew.yaml
+
+runs:
+  - run: v1-run2
+    prompt_version: objective_extractor@v1
+    model: MODEL_FRONTIER (as pinned at time of run)
+    extracted_count: 10
+    note: >-
+      Ten fine-grained objectives against the gold's four. Individually sound,
+      collectively the wrong granularity — each extracted objective is roughly a
+      scene, not a video. This is a spec bug (the brief carried no video budget
+      and v1 of the prompt never defined an objective's size), not a model error.
+
+    # gold ref -> the extracted refs that together cover it.
+    # A gold objective is COVERED when the extracted set collectively teaches it,
+    # even if no single extracted objective matches it one-to-one.
+    coverage:
+      o1:
+        extracted: [o1, o2, o3, o4]
+        verdict: covered_but_split
+        comment: >-
+          Gold o1 is one assumed objective for snapshot isolation. The extractor
+          split its content four ways: xid semantics (o1), SQL transaction blocks
+          (o2), tuple versioning via xmin/xmax (o3), and snapshot composition
+          (o4). It also marked o1 and o2 assumed, correctly. The content is
+          present and accurate; the packaging is four objectives where the gold
+          has one assumed refresher.
+
+      o2:
+        extracted: [o5, o6]
+        verdict: covered_but_split
+        comment: >-
+          Gold o2 is "which anomalies RR prevents and how". Extracted o5 is the
+          visibility test (predict what a transaction sees) and o6 contrasts
+          Read Committed's per-statement snapshot with RR's transaction-scoped
+          one. Together they cover the gold criterion's mechanism. Neither names
+          the three anomalies explicitly — a genuine partial gap, not just a
+          split.
+
+      o3:
+        extracted: [o7, o8]
+        verdict: covered
+        comment: >-
+          o7 is a direct match: predict whether the invariant breaks for two
+          concurrent RR transactions updating different rows. This is the only
+          pairing the automatic scorer found (0.41). o8 adds the contrast with
+          the same-row case RR does catch — content the gold graph does not
+          require and which improves on it.
+
+      o4:
+        extracted: [o9, o10]
+        verdict: covered
+        comment: >-
+          o9 traces rw-dependencies under SERIALIZABLE and identifies the pivot
+          transaction; o10 evaluates remedies. Notable because the brief never
+          mentions SSI and both runs reached it unprompted — the opposite of the
+          predicted failure. o9's pivot-transaction framing is also what settled
+          the gold file's o4 wording.
+
+    unmapped_extracted: []
+    verdict: >-
+      4 of 4 gold objectives covered by content; 0 of 4 matched at gold
+      granularity. Chain o1->o2->o3->o4 preserved in the extracted graph's
+      structure (o1->o3->o4->o5->o6->o7->o8->o9/o10 is the same spine at finer
+      resolution). No banned verbs, no cycles, no repair round-trip, all
+      deterministic checks passed on the first attempt.
+      The failure is granularity alone.
+
+# What a v2 run has to do to count as an improvement:
+#
+#   - taught objective count between max_videos and 2 x max_videos (so 1-2 for
+#     Milestone A), plus assumed objectives as needed
+#   - gold o2 and o3 each matched by a single extracted objective
+#   - the RR-prevents-write-skew error still absent
+#   - anything beyond the budget declared in out_of_scope rather than emitted
+#
+# Record the v2 run as a second entry here rather than editing this one. The
+# before/after pair IS the regression harness (PRD §14.4) in miniature.
+
+  # ---------------------------------------------------------------------------
+  # DRAFTED BY CLAUDE CODE, 14 Aug 2026 — NOT yet reviewed by a human.
+  # This file's own premise is that a human does the aligning. I was asked to
+  # record this run, so I have, but every `verdict` below is my judgment and not
+  # Sanket's. The two calls I am least sure of are marked UNSURE.
+  # ---------------------------------------------------------------------------
+  - run: v2-run1
+    prompt_version: objective_extractor@v2
+    model: claude-opus-5 (MODEL_FRONTIER as pinned 14 Aug 2026)
+    extracted_count: 5
+    note: >-
+      Two taught objectives plus three assumed, against v1's ten taught. The
+      granularity contract held exactly: max_videos=1 in the brief, and the
+      model emitted 1-2 taught objectives and pushed the rest into out_of_scope
+      rather than expanding the graph. Output tokens fell 5462 -> 3022 and cost
+      $0.1380 -> $0.0771 for a graph that is closer to the gold, which is the
+      unusual case of the cheaper run being the better one.
+
+    coverage:
+      o1:
+        extracted: [o1]
+        verdict: covered_but_reframed
+        comment: >-
+          Gold o1 is snapshot isolation, marked assumed. Extracted o1 teaches
+          the same mechanism (what each statement reads, xmin/xmax, snapshot
+          taken once at first statement) as an apply-level taught objective
+          rather than an assumed refresher. The content is present and more
+          demanding than the gold asks for. The `assumed` flag therefore
+          differs, and the diff reports that — correctly, since a taught
+          objective and an assumed one cost very different amounts of video.
+
+      o2:
+        extracted: [o1]
+        verdict: partial
+        comment: >-
+          UNSURE. Gold o2's criterion requires naming dirty read,
+          non-repeatable read and phantom read, and attributing prevention to
+          the transaction-scoped snapshot. Extracted o1 delivers the second half
+          precisely ("the snapshot is taken once at the transaction's first
+          statement and does not advance on later commits") and its assessment
+          item a1 tests exactly that. It never names the three anomalies. This is
+          the same gap the v1-run2 entry recorded for o2, unchanged by v2 — so
+          it is a real, persistent miss and not a granularity artefact. I have
+          mapped it to o1 because that is where the content lives; a reviewer
+          might reasonably call gold o2 uncovered instead.
+
+      o3:
+        extracted: [o2]
+        verdict: covered
+        comment: >-
+          Direct match, and the strongest result in the run. Extracted o2
+          predicts write skew for two RR transactions updating disjoint rows,
+          names the invariant, and states that first-updater-wins does not fire
+          because no single row is updated twice. That last clause is gold
+          extraction_note 4 — the contrast the note says to reward rather than
+          penalise — reached without being asked. Bloom matches (apply/apply).
+          knowledge_type differs (gold procedural, extracted conceptual) and the
+          diff reports it.
+
+      o4:
+        extracted: []
+        verdict: out_of_scope_declared
+        comment: >-
+          UNSURE how the harness should score this. Gold o4 is marked
+          `in_milestone_a: false` and the brief sets max_videos=1, so o4 SHOULD
+          be absent. v2 did not silently drop it: `out_of_scope` names SSI,
+          predicate locks, false-positive aborts, SELECT ... FOR UPDATE and
+          40001 retry loops, and estimates roughly two further videos. That is
+          the prompt v2 contract working as designed. The diff still counts it
+          as 1 missing, because it is missing from the graph. Whether "declared
+          out of scope" should count as covered is a policy decision for the
+          gold file's author, not for me.
+
+    unmapped_extracted: [o3, o4, o5]
+    verdict: >-
+      Granularity fixed. 2 taught objectives for a 1-video budget, against v1's
+      10. Gold o3 matched one-to-one for the first time. Gold o1 covered but
+      taught rather than assumed; gold o2 still partial on the anomaly naming;
+      gold o4 correctly declared out of scope rather than emitted. The three
+      unmapped extracted objectives (o3, o4, o5) are the brief's own
+      prior_knowledge restated as assumed objectives — ACID, SQL, xid — which
+      the gold graph does not model, so they are noise in the diff rather than
+      extra content. All deterministic checks passed on the first attempt; no
+      repair round trip; no banned verbs; chain preserved (o3/o4/o5 -> o1 -> o2).
+      Remaining known gap: the three anomaly names in gold o2's criterion.

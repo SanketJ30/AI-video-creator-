@@ -311,6 +311,13 @@ def _report_extraction(conn, course_id: str, slug: str, outcome) -> None:
                f"items, {len(outcome.attempts)} model call(s), "
                f"${outcome.cost_usd:.4f}")
     typer.echo(f"teaching order: {' -> '.join(graph.teaching_order)}")
+    if outcome.out_of_scope:
+        # Printed, not buried: the boundary the model drew is the difference
+        # between a scoped course and a silently truncated one, and it is the
+        # thing a human most needs to disagree with at review.
+        typer.echo("")
+        typer.echo(typer.style("declared out of scope:", fg=typer.colors.CYAN))
+        typer.echo(f"  {outcome.out_of_scope}")
     typer.echo("")
     colour = typer.colors.GREEN if outcome.report.ok else typer.colors.RED
     typer.echo(typer.style(outcome.report.render(), fg=colour))
@@ -414,12 +421,21 @@ def objectives_diff(
     slug: str,
     against: str = typer.Option(..., "--against",
                                 help="path to a hand-authored gold graph yaml"),
+    alignment: str | None = typer.Option(
+        None, "--alignment",
+        help="hand-authored alignment yaml; used when it has an entry recorded "
+             "for this run, otherwise the scorer runs and says it is approximate"),
+    run: str | None = typer.Option(
+        None, "--run", help="force a specific run id from the alignment file"),
 ) -> None:
     """Compare the stored graph against a hand-authored gold graph.
 
     Reports missing objectives, extra objectives, wrong Bloom levels and wrong
-    edges. Alignment is by content, not by ref, and is printed so you can reject
-    a pairing the matcher got wrong.
+    edges. Every diff states how it aligned the two graphs: HAND when a human
+    recorded the mapping for this exact run, APPROXIMATE when the content scorer
+    guessed. The scorer cannot match a gold objective the extractor split across
+    several, so on a granularity mismatch its answer is close to meaningless —
+    which is why the label is never omitted.
     """
     gold = goldgraph.load_gold(against)
     with db.tx() as conn:
@@ -430,7 +446,24 @@ def objectives_diff(
                    f"`explainer objectives extract {slug}` first", err=True)
         raise typer.Exit(1)
 
-    d = goldgraph.diff(graph.objectives, gold)
+    # The prompt version the stored graph was produced by, so the alignment file
+    # can only match the run it was actually written for.
+    prompt_version = next((p.get("prompt_version", "")
+                           for p in graph.provenance.values() if p.get("prompt_version")), "")
+    align_file = goldgraph.load_alignment(alignment) if alignment else None
+    try:
+        d = goldgraph.diff(graph.objectives, gold, alignment=align_file,
+                           prompt_version=prompt_version, run=run)
+    except ValueError as e:
+        typer.echo(typer.style(str(e), fg=typer.colors.RED), err=True)
+        raise typer.Exit(2) from None
+
+    if align_file and d.approximate:
+        typer.echo(typer.style(
+            f"note: {align_file.path.name} has no entry recorded for this run "
+            f"({prompt_version or 'unknown prompt version'}, "
+            f"{len(graph.objectives)} objectives) — falling back to the scorer.",
+            fg=typer.colors.YELLOW))
     typer.echo(f"gold: {gold.path}  ({gold.topic})")
     typer.echo(d.render())
     if gold.notes:
