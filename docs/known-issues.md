@@ -893,3 +893,60 @@ Both incidents printed correct numbers while the video was unchanged. The only
 thing that caught either was decoding the finished file and measuring it — which
 is also how the column bug was found, by looking at a frame rather than reading
 a report.
+
+---
+
+## ISSUE-17 — no vertical composition: every scene sits in the upper-left · OPEN (Phase 5)
+
+**Observed on frames from the corrected re-render, all nine scenes.** Content
+occupies the upper-left of the frame; the bottom 30–40% is dead in every scene.
+The cold open's single line floats at roughly 45% height with nothing anchoring
+it above or below.
+
+There is no vertical rhythm and no safe-area-aware placement. `Scene.tsx` sets
+`justifyContent: "center"` on a column flex and reserves the caption zone as
+bottom padding, and that is the entire layout system — one rule, applied
+identically to a four-word headline and a four-row table.
+
+**This is an absence of design, not a bug.** Nothing is broken; nothing was
+designed. A motion designer would specify a baseline grid, an optical centre
+that differs from the geometric one, entry and settle positions per treatment,
+and placement that reads the caption safe area as a composition boundary rather
+than as padding.
+
+**Not fixed, deliberately.** §22 puts brand and visual craft in **Phase 5**, and
+inventing a layout system here would be authoring a large set of unreviewed
+numbers in exactly the area where a specialist's judgement is the whole value.
+
+**It is one of the two named gaps blocking Milestone A's success criterion** —
+"an instructional designer reviews the objective graph and the rendered video
+and says *I'd sign off on this*". See `docs/week6-plan.md`.
+
+---
+
+## ISSUE-18 — typography and colour do no work · OPEN (Phase 5)
+
+**Observed on the same frames.** The visual system is:
+
+- **one font family** (`Segoe UI, Helvetica, Arial, sans-serif`), plus a
+  monospace stack used only by `terminal_replay`
+- **one weight distinction**: 700 vs 400
+- **two effective sizes** per scene, derived arithmetically from `minFontPx`
+  (`×3`, `×2`, `×1`)
+- **four hex literals** — `INK`, `PAPER`, `ACCENT`, `MUTED` — authored in
+  `Scene.tsx` because no brand palette exists (week-4 **D6**)
+
+So hierarchy is expressed by bold-vs-regular and nothing else. There is no
+type scale, no colour semantics (an accent that means "attention" is the same
+accent that means "this row is the answer"), no state vocabulary, and the
+`a11y` contrast checker still reports `contrast_unresolved` because there is no
+palette to check.
+
+**Also an absence of design.** The four colours are placeholders that were
+honest about being placeholders; they were never a system.
+
+**Not fixed, deliberately** — same reasoning as ISSUE-17. §22 Phase 5 owns brand,
+and `a11y.check_contrast` is already built and waiting for a palette to run
+against, so the work attaches without a rewrite.
+
+**The second of the two named gaps blocking Milestone A's success criterion.**

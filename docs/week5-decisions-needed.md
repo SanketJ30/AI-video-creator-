@@ -1,5 +1,9 @@
 # Week 5 — decisions needed
 
+> **ALL RESOLVED 15 Aug 2026.** Kept as the record of what was asked and what
+> was decided. W5 is the one to read: a standing instruction was **overridden on
+> measured evidence**, and the override was accepted.
+
 Written during the unattended run. Each entry: options, my recommendation, what
 I did, and where it is marked in the code. None of these blocks progress; all
 are reversible.
@@ -33,6 +37,10 @@ stale audio.
 §16.1's preferred "TTS-native timestamps" path is unavailable — see W3. When a
 provider key arrives, the provider is one function; the closure, the store and
 the alignment contract do not change.
+
+> **RESOLVED: accepted.** Content-hashing the voice FILE into the closure
+> (`tts.voice_fingerprint`) confirmed as the right instinct — pinning the name
+> alone would serve stale audio when a file is swapped underneath it.
 
 ---
 
@@ -93,6 +101,13 @@ consumer cannot mistake one for the other.
 outputs or a provider with native timestamps is available. Word-level kinetic
 typography (§16.1) should not ship against estimated timings.
 
+> **RESOLVED: accepted.** Span-level captions exact, word-level estimated and
+> labelled on every word. The kinetic-typography constraint is recorded as a
+> **precondition on the `key_phrase` template itself** (`Template.preconditions`)
+> rather than as a general caveat — it constrains one capability of one
+> template, and it now travels with the thing it constrains instead of living
+> in a findings doc nobody opens while editing it.
+
 ---
 
 ## W4 — `spans.py` splits on an ellipsis and I may not fix it
@@ -113,6 +128,12 @@ typography (§16.1) should not ship against estimated timings.
 
 **Chosen: 2**, with the root cause logged as ISSUE-11 for whoever owns R4. Two
 of v2's nine scenes (s05, s07) currently use the fallback.
+
+> **RESOLVED: superseded by W5.** The splitter fix landed anyway (ellipses,
+> abbreviations, decimals, version numbers) and took v2 from 46 to 40 spans and
+> 3 mismatched scenes to 1. But the remaining 1 is what made W5 necessary, so
+> the fallback question is moot: there is no fallback now, because there is no
+> second partition to reconcile.
 
 ---
 
@@ -157,3 +178,23 @@ an affected scene. Option 2 pays the same prosody cost on an unpredictable subse
 while keeping the bug.
 
 **Reversible in one function** if you disagree: `speech.speak` is four lines.
+
+> **RESOLVED: ACCEPTED — and the standing instruction was wrong.**
+>
+> This is the one entry worth keeping for its own sake. Step 1 of the week-5
+> brief said, unambiguously: *"Per-scene audio, one call per scene, not per
+> span."* I built that, and then measured that it could not hold:
+>
+> ```
+> v2 s05, 7 spans:  each span synthesised ALONE  -> 7 chunks
+>                   all seven synthesised TOGETHER -> 6 chunks
+> ```
+>
+> Per-scene synthesis requires two independent sentence splitters to agree, and
+> piper's is context-sensitive and not ours to control. No improvement to our
+> splitter can close that — it can only lower the rate.
+>
+> **The instruction was overridden on measured evidence, and the override was
+> accepted.** Recorded here rather than quietly implemented: an instruction
+> reversed by a measurement should leave a trail, so the next person can see
+> both the original reasoning (prosody continuity) and the number that beat it.

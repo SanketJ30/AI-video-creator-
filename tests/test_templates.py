@@ -279,3 +279,22 @@ def test_every_template_has_at_least_one_on_screen_slot():
         drawable = [p for p in t.params
                     if p.on_screen or p.type is ParamType.ASSET_REF]
         assert drawable, f"{t.name} has no slot that puts anything on screen"
+
+
+def test_kinetic_typography_carries_its_word_timing_precondition():
+    """W3: §16.1 drives per-word highlighting from the word sidecar, and those
+    timings are ESTIMATED. The constraint lives on the template it constrains
+    rather than in a findings doc nobody opens while editing it."""
+    t = templates.get("key_phrase")
+    assert t.kind is Kind.KINETIC_TYPE
+    assert t.preconditions, "the kinetic-type template must state it"
+    joined = " ".join(t.preconditions)
+    assert "estimated" in joined and "W3" in joined
+
+
+def test_preconditions_do_not_block_a_render():
+    """They are standing notes, not validation. A precondition that silently
+    failed a render would be the ISSUE-13 failure shape again."""
+    t = templates.get("key_phrase")
+    assert not templates.validate_params(t, {"phrase": "Spot it.",
+                                             "emphasis": "Spot"})

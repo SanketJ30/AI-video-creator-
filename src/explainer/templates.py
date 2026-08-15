@@ -156,6 +156,11 @@ class Template:
     safe_area: SafeArea = field(default_factory=SafeArea)
     renderer: str = "agnostic"
     min_font_px: int = MIN_FONT_PX
+    # Conditions that must hold before a CAPABILITY of this template may ship.
+    # Not a validation rule — nothing here blocks a render. It is a standing
+    # note attached to the thing it constrains, so it travels with the template
+    # instead of living in a findings doc nobody opens while editing it.
+    preconditions: tuple[str, ...] = ()
 
     def param(self, name: str) -> Param:
         for p in self.params:
@@ -231,6 +236,17 @@ TEMPLATES: dict[str, Template] = {
             name="key_phrase", version="1.1.0", kind=Kind.KINETIC_TYPE,
             description="One phrase, typeset large. §9.4's abridged near-paraphrase "
                         "lives here — never a full narration sentence.",
+            preconditions=(
+                "Word-level kinetic typography must not ship while word "
+                "timings are estimated. §16.1 drives per-word highlighting "
+                "from the word sidecar; align.py MEASURES span boundaries and "
+                "ESTIMATES word boundaries inside them "
+                "(WORD_METHOD='estimated:syllable_weighted'), because this "
+                "voice exports no alignment outputs. Highlighting a word at an "
+                "estimated time looks right on a short line and drifts on a "
+                "long one. Precondition: a TTS voice with native word "
+                "timestamps, or MFA. Until then this template holds its phrase "
+                "and does not animate per word. (W3)",),
             params=(
                 Param("phrase", ParamType.TEXT,
                       description="≤20% of the scene's narration word count (§9.4)"),
