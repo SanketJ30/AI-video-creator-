@@ -253,6 +253,11 @@ def parse(raw: str, scenes: list[dict]) -> list[ScenePlan]:
             problems.append(
                 f"{ref}: slots_json decodes to {type(slots).__name__}, not an object")
             continue
+        if not template.design_section:
+            problems.append(
+                f"{ref}: template '{template.name}' has no designed layout "
+                f"(ISSUE-20) and is not available. Choose one of "
+                f"{sorted(t.name for t in templates.selectable())}.")
         problems += [f"{ref}: {p}" for p in templates.validate_params(template, slots)]
 
         motion = str(s.get("motion") or "").strip()
@@ -330,7 +335,9 @@ def plan(conn, course_id: str | None, brief: CourseBrief, video: dict,
              "seconds": [t.min_sec, t.max_sec],
              "supports_signalling": t.supports_signalling,
              "params": t.param_schema()}
-            for t in sorted(templates.TEMPLATES.values(), key=lambda t: t.name)
+            # ISSUE-20: only designed templates are offered. An undesigned
+            # one renders legibly but its composition was improvised.
+            for t in sorted(templates.selectable(), key=lambda t: t.name)
         ],
     }
     user_turn = parts["scenes"].replace(

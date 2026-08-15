@@ -195,6 +195,22 @@ class Template:
     # rate. Nothing in §9 describes one. Until then, asking for rigid is asking
     # for silence.
     intrinsic_tempo: bool = False
+    # Which section of docs/design/video-design-system.md specifies this
+    # template's layout and motion. Empty means NO DESIGN EXISTS.
+    #
+    # §9 designs six templates; this registry holds eleven. An undesigned
+    # template still renders — correct tokens, correct type scale, inside the
+    # §4 content region — but its composition was improvised, and the planner
+    # was being shown all eleven and could select any of them. MEASURED:
+    # `labelled_diagram` was selected on this very course two storyboard runs
+    # ago. That is an undesigned layout one re-plan away from shipping in a
+    # video nobody reviewed the composition of.
+    #
+    # So `selectable()` offers only designed templates to the planner. This is a
+    # GATE, not a deletion: the five keep their schemas, their validation and
+    # their renderers, and each is re-enabled by filling in this one field once
+    # its layout is designed. See ISSUE-20 for what each is for.
+    design_section: str = ""
 
     def param(self, name: str) -> Param:
         for p in self.params:
@@ -245,7 +261,7 @@ TEMPLATES: dict[str, Template] = {
             min_sec=8, max_sec=120),
 
         Template(
-            name="state_timeline", version="1.2.0", kind=Kind.ANIMATED_DIAGRAM,
+            name="state_timeline", version="1.2.0", design_section="§9.4", kind=Kind.ANIMATED_DIAGRAM,
             description="Parallel tracks advancing through time — two sessions, "
                         "two threads, a before/after. The one template where the "
                         "referent genuinely changes over time (§8).",
@@ -267,7 +283,7 @@ TEMPLATES: dict[str, Template] = {
             min_sec=15, max_sec=120),
 
         Template(
-            name="key_phrase", version="1.2.0", kind=Kind.KINETIC_TYPE,
+            name="key_phrase", version="1.2.0", design_section="§9.3", kind=Kind.KINETIC_TYPE,
             description="One phrase, typeset large. §9.4's abridged near-paraphrase "
                         "lives here — never a full narration sentence.",
             preconditions=(
@@ -317,7 +333,7 @@ TEMPLATES: dict[str, Template] = {
             min_sec=8, max_sec=90),
 
         Template(
-            name="table_build", version="1.2.0", kind=Kind.DATA_VIZ,
+            name="table_build", version="1.2.0", design_section="§9.5", kind=Kind.DATA_VIZ,
             description="Rows revealed in order. Comparison where the cells are "
                         "the content.",
             params=(
@@ -357,7 +373,7 @@ TEMPLATES: dict[str, Template] = {
             min_sec=10, max_sec=120),
 
         Template(
-            name="concept_illustration", version="1.2.0", kind=Kind.ILLUSTRATION,
+            name="concept_illustration", version="1.2.0", design_section="§9.6", kind=Kind.ILLUSTRATION,
             description="A drawn metaphor for an abstract idea. §4.4 ranks this "
                         "below a rendered diagram — reach for it when there is "
                         "nothing structural to draw.",
@@ -383,7 +399,7 @@ TEMPLATES: dict[str, Template] = {
             min_sec=4, max_sec=45),
 
         Template(
-            name="title_card", version="1.2.0", kind=Kind.TITLE_HOOK,
+            name="title_card", version="1.2.0", design_section="§9.2", kind=Kind.TITLE_HOOK,
             description="The objective slot's line, typeset. §9.1 reuses the "
                         "objective verbatim as the scene title.",
             params=(
@@ -396,7 +412,7 @@ TEMPLATES: dict[str, Template] = {
             min_sec=3, max_sec=15),
 
         Template(
-            name="cold_open", version="1.2.0", kind=Kind.TITLE_HOOK,
+            name="cold_open", version="1.2.0", design_section="§9.1", kind=Kind.TITLE_HOOK,
             description="A concrete situation before any explanation. §4.4 puts "
                         "stock here specifically: 'a hook at the open, or a "
                         "real-world shot that grounds the problem'.",
@@ -498,6 +514,23 @@ def validate_params(template: Template, params: dict) -> list[str]:
             problems.append(f"{template.name}: '{p.name}' must be a string")
 
     return problems
+
+
+def selectable() -> list["Template"]:
+    """Templates the visual planner may choose from.
+
+    Only those with a design section. An undesigned template renders legibly but
+    its composition was improvised, and offering it to the planner risks
+    shipping a layout nobody designed — which is the whole of ISSUE-20.
+
+    Reversible per template: fill in `design_section` once a layout exists.
+    """
+    return [t for t in TEMPLATES.values() if t.design_section]
+
+
+def undesigned() -> list["Template"]:
+    """The ones awaiting a design decision — design them, or retire them."""
+    return [t for t in TEMPLATES.values() if not t.design_section]
 
 
 def effective_timing_sensitivity(template_name: str,

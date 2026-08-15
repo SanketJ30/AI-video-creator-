@@ -345,3 +345,48 @@ def test_rigid_survives_on_a_template_that_earns_it():
 def test_an_unknown_template_cannot_claim_a_tempo():
     got, why = templates.effective_timing_sensitivity("no_such", "rigid")
     assert got == "elastic" and "unknown" in why
+
+
+# ================== ISSUE-20: undesigned templates are not selectable
+
+def test_only_designed_templates_are_offered_to_the_planner():
+    """§9 designs six; the registry holds eleven. An undesigned template renders
+    legibly but its composition was improvised, and the planner was being shown
+    all eleven — MEASURED: `labelled_diagram` was selected on this course two
+    storyboard runs ago."""
+    assert {t.name for t in templates.selectable()} == {
+        "cold_open", "title_card", "key_phrase", "state_timeline",
+        "table_build", "concept_illustration"}
+
+
+def test_every_selectable_template_names_its_design_section():
+    for t in templates.selectable():
+        assert t.design_section.startswith("§9."), (
+            f"{t.name} is selectable but names no design section")
+
+
+def test_the_undesigned_five_are_named_rather_than_deleted():
+    """A gate, not a deletion: they keep their schemas, validation and
+    renderers, and each is re-enabled by filling in one field."""
+    assert {t.name for t in templates.undesigned()} == {
+        "labelled_diagram", "series_build", "term_card", "terminal_replay",
+        "ui_walkthrough"}
+    for t in templates.undesigned():
+        assert t.params, f"{t.name} kept its schema"
+
+
+def test_the_planner_catalog_excludes_the_undesigned():
+    """The risk is a layout nobody reviewed shipping in a video. The model
+    cannot choose what it is not shown."""
+    import inspect
+    from explainer.agents import visual_planner
+    src = inspect.getsource(visual_planner)
+    assert "templates.selectable()" in src
+    assert "sorted(templates.TEMPLATES.values()" not in src
+
+
+def test_choosing_an_undesigned_template_is_rejected():
+    """Belt and braces: even if one reached the parser, it does not pass."""
+    import inspect
+    from explainer.agents import visual_planner
+    assert "has no designed layout" in inspect.getsource(visual_planner)

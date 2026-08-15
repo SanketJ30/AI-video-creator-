@@ -1052,7 +1052,7 @@ caps how useful the challenger can be no matter how good its verdicts are.
 
 ---
 
-## ISSUE-20 — the registry holds eleven templates; the design system designs six · OPEN
+## ISSUE-20 — the registry holds eleven templates; the design system designs six · GATED, awaiting a decision
 
 `docs/design/video-design-system.md` §9 specifies six templates: `cold_open`,
 `title_card`, `key_phrase`, `state_timeline`, `table_build`,
@@ -1084,3 +1084,42 @@ design system is derived from.
 
 Until then the planner may still select them, and any scene that does gets a
 legible frame with no design behind it.
+
+
+---
+
+## ISSUE-20 — measured, gated, and handed over
+
+**The question was whether the undesigned five are reachable. They were.**
+
+| | |
+|---|---|
+| templates the planner was shown | **all 11** |
+| designed (§9) | 6 |
+| undesigned but selectable | 5 |
+| undesigned in the CURRENT storyboard | **0** |
+| undesigned selected on this course previously | **`labelled_diagram`**, two storyboard runs ago |
+
+So nothing improvised is shipping today, and it was **one re-plan away** from
+shipping — which makes it a live risk rather than a scope note. The planner
+chose an undesigned template on this exact course when it was offered one.
+
+**Gated.** `Template.design_section` names the section that specifies a
+template; empty means undesigned. `templates.selectable()` returns only designed
+ones and is what builds the planner's catalogue, so the model cannot choose what
+it is not shown. The parser rejects an undesigned template as a second line of
+defence.
+
+This is a gate, not a deletion: all five keep their schemas, validation and
+renderers, and each is re-enabled by filling in one field.
+
+**Not designed and not retired by me.** `docs/design/undesigned-templates.md`
+lists all five with what each is for, what overlaps it, and what blocks it, plus
+a recommendation per template — design `labelled_diagram` and `terminal_replay`,
+defer `ui_walkthrough` and `series_build`, consider retiring `term_card`. Those
+are recommendations for Sanket, not decisions taken.
+
+Two of the five are blocked on things other than design, which is worth knowing
+before anyone schedules the work: `ui_walkthrough`'s subject is an **asset** and
+`series_build` has **no chart renderer** — §15 specifies how a chart should
+behave and there is nothing there to move.

@@ -39,12 +39,16 @@ def plan_json(entries):
     return json.dumps({"scenes": entries})
 
 
-def entry(ref="s01", template="labelled_diagram", slots=None, motion="static_reveal",
+def entry(ref="s01", template="table_build", slots=None, motion="static_reveal",
           changes=False, what_changes="", rationale="r"):
+    # A DESIGNED template (ISSUE-20): the planner is only offered templates
+    # with a §9 layout, so a fixture using an undesigned one is now rejected.
     import json as _j
     return {"scene_ref": ref, "template": template,
             "slots_json": _j.dumps(slots if slots is not None
-                                   else {"nodes": [{"id": "n1", "label": "row version"}]}),
+                                   else {"columns": ["Option", "Cost"],
+                                         "rows": [{"cells": ["SERIALIZABLE",
+                                                             "retry"]}]}),
             "motion": motion, "referent_changes_over_time": changes,
             "what_changes": what_changes, "rationale": rationale}
 
@@ -152,11 +156,13 @@ def test_a_template_inside_its_band_is_accepted():
 
 
 def test_slot_item_limits_from_section_9_3_are_enforced():
+    """§9.3 caps what a layout holds legibly. table_build allows 8 rows."""
     with pytest.raises(vp.ox.SchemaError) as e:
         vp.parse(plan_json([entry(slots={
-            "nodes": [{"id": f"n{i}", "label": str(i)} for i in range(9)]})]),
+            "columns": ["Option", "Cost"],
+            "rows": [{"cells": [f"opt{i}", "x"]} for i in range(9)]})]),
             [scene()])
-    assert "more than the 7" in str(e.value)
+    assert "more than the 8" in str(e.value)
 
 
 # --------------------------------------------------------- completeness
@@ -205,7 +211,7 @@ def test_the_caption_safe_area_comes_from_the_template_not_the_model():
     p = run([entry()])
     spec = p.scenes[0].visual_spec(p.provenance)
     assert spec["captionSafeArea"] == templates.get(
-        "labelled_diagram").safe_area.to_json()
+        "table_build").safe_area.to_json()
     assert spec["captionSafeArea"]["bottom"] == templates.CAPTION_SAFE_BOTTOM
 
 
@@ -238,5 +244,9 @@ def test_the_template_catalogue_reaches_the_model():
     vp.plan(None, None, CourseBrief(title="t"), video(), [scene()], [obj()],
             client=client)
     sent = client.messages.calls[0]["messages"][0]["content"]
-    for name in ("labelled_diagram", "state_timeline", "key_phrase"):
+    for name in ("state_timeline", "key_phrase", "table_build"):
         assert name in sent
+    # ISSUE-20: an undesigned template must not reach the model at all — the
+    # model cannot choose what it is not shown.
+    for undesigned in ("labelled_diagram", "terminal_replay", "ui_walkthrough"):
+        assert undesigned not in sent
