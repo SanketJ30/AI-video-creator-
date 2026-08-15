@@ -192,6 +192,76 @@ draft the cheap default (E2).
 
 ---
 
+## 4b. Evidence that position-independence survives a real edit
+
+**This is the property Milestone B has to preserve, and it has now been observed
+on a real edit rather than a synthetic one.** Re-run it as a regression check.
+
+### What happened
+
+The §15.3 timing fix changed `s04`'s `timing_sensitivity` from `rigid` to
+`elastic`. That changed **s04's duration** (90.00 s → 74.53 s), which changed
+**the start time of every scene after it**, which changed **the whole video's
+runtime** (213.30 s → 195.43 s).
+
+Two scenes were nonetheless served **byte-identically from cache**:
+
+```
+s08    key_phrase    241 frames    cached    1c7d5a4ef0cb
+s09    key_phrase    146 frames    cached    2189cfd44554
+```
+
+Both sit *after* s04. Both had their absolute start time moved by the edit.
+Neither re-rendered.
+
+### Why it held
+
+§11.4: *"scene renders are position-independent; the cache key must not include
+absolute start time."* The render closure is template, template version, slots,
+resolved cues, duration **in frames**, caption safe area, min font px, renderer
+version, renderer source, ffmpeg version, codec. It contains **no scene ref, no
+video id, no ordinal and no start time** — R1's "durations are stored, positions
+are derived" carried all the way into the cache key.
+
+s08 and s09 kept the same narration, the same slots, the same cues and the same
+frame count, so their closures were unchanged and their bytes were already in the
+store. Scenes s01–s07 re-rendered because the storyboard pass had changed their
+templates or their frame counts.
+
+### Why the contractor should care
+
+Milestone B's kill criterion is *"edit one word in scene 5, verify: 1 scene
+re-renders, sync holds, cost is near zero."* This is the same property, observed
+from the other direction: an edit that moved every downstream scene in **time**
+moved none of them in **identity**. Sync held — measured runtime matched the
+resolved timeline to the hundredth of a second, with no accumulated drift across
+nine scenes.
+
+**Scoped generation must not break this.** Concretely, a per-scene or per-span
+rewrite must not:
+
+- put the scene ref, the ordinal, or the start time into any closure to make
+  bookkeeping easier;
+- renumber scenes, since `s08` is an identity and the render is keyed on content
+  rather than on it;
+- recompute frame counts for untouched scenes — a duration that changes by one
+  frame for no reason invalidates a render that should have been free.
+
+### As a regression check
+
+```
+explainer video info mvcc-write-skew v2        # note s08/s09 frame counts
+# change one scene's duration (e.g. its timing_sensitivity)
+explainer render mvcc-write-skew v2            # expect s08, s09 "cached"
+```
+
+The check is that **scenes whose content did not change report `cached` even
+though their position did**. If they re-render, something has leaked position
+into the closure, and §11.4 has been lost — quietly, because the output would
+still be correct and only the cost would tell you.
+
+---
+
 ## 5. The one-line summary for whoever picks this up
 
 > Everything downstream of authoring already works at span and scene grain, and
