@@ -105,7 +105,7 @@ def test_the_second_call_is_a_cache_hit():
 
 def test_spans_tile_the_audio_exactly():
     a = tts.synthesize(TWO)
-    al = A.align("s01", Narration.from_text(TWO), a)
+    al = A.align("s01", Narration.author(TWO), a)
     assert al.spans[0].start == 0
     assert al.spans[-1].end == a.sample_count
     for x, y in zip(al.spans, al.spans[1:]):
@@ -114,7 +114,7 @@ def test_spans_tile_the_audio_exactly():
 
 def test_every_span_receives_a_start_and_an_end():
     a = tts.synthesize(TWO)
-    n = Narration.from_text(TWO)
+    n = Narration.author(TWO)
     al = A.align("s01", n, a)
     assert {s.span_id for s in al.spans} == {s.id for s in n.spans}
     assert all(s.end > s.start for s in al.spans)
@@ -124,7 +124,7 @@ def test_span_timings_are_measured_and_word_timings_are_estimated():
     """§16.1 drives kinetic typography from this sidecar. A consumer that reads
     an estimate as a measurement builds a feature that drifts on long lines."""
     a = tts.synthesize(TWO)
-    al = A.align("s01", Narration.from_text(TWO), a)
+    al = A.align("s01", Narration.author(TWO), a)
     assert al.spans[0].method.startswith("measured")
     assert al.spans[0].words[0].method.startswith("estimated")
     doc = al.to_json()
@@ -134,19 +134,19 @@ def test_span_timings_are_measured_and_word_timings_are_estimated():
 def test_duration_is_derived_from_the_audio():
     """R5: never authored."""
     a = tts.synthesize(TWO)
-    al = A.align("s01", Narration.from_text(TWO), a)
+    al = A.align("s01", Narration.author(TWO), a)
     assert al.duration == rtime.RationalTime.from_samples(a.sample_count, 48000)
 
 
 def test_resolving_a_cue_span_gives_a_time():
     """R3: a cue names a span; this is where that becomes a time."""
-    n = Narration.from_text(TWO)
+    n = Narration.author(TWO)
     al = A.align("s01", n, tts.synthesize(TWO))
     assert al.resolve(n.spans[1].id).start_time().value > 0
 
 
 def test_resolving_an_unknown_span_lists_the_real_ones():
-    n = Narration.from_text(TWO)
+    n = Narration.author(TWO)
     al = A.align("s01", n, tts.synthesize(TWO))
     with pytest.raises(A.AlignmentError) as e:
         al.resolve("sp_deadbeef00")
@@ -163,7 +163,7 @@ class FakeAudio:
 
 def test_a_partition_mismatch_is_a_hard_error_not_a_positional_guess():
     """ISSUE-11 exactly. A positional guess would mistime every cue."""
-    n = Narration.from_text(TWO)
+    n = Narration.author(TWO)
     with pytest.raises(A.AlignmentError) as e:
         A.align("s05", n, FakeAudio([{"start": 0, "end": 100}], 100))
     assert "2 spans but 1 TTS chunks" in str(e.value)
@@ -171,25 +171,49 @@ def test_a_partition_mismatch_is_a_hard_error_not_a_positional_guess():
 
 def test_no_chunks_at_all_is_a_hard_error():
     with pytest.raises(A.AlignmentError) as e:
-        A.align("s01", Narration.from_text(SHORT), FakeAudio([], 0))
+        A.align("s01", Narration.author(SHORT), FakeAudio([], 0))
     assert "no chunk boundaries" in str(e.value)
 
 
 def test_a_zero_length_span_is_a_hard_error():
     with pytest.raises(A.AlignmentError):
-        A.align("s01", Narration.from_text(SHORT),
+        A.align("s01", Narration.author(SHORT),
                 FakeAudio([{"start": 0, "end": 0}], 0))
 
 
-def test_the_per_span_fallback_recovers_a_mismatched_scene():
-    """ISSUE-11's workaround: every span still gets a measured start and end,
-    and the deviation is reported on the result rather than hidden."""
+def test_the_issue_11_sentence_segments_correctly():
+    """ISSUE-11 FIXED. `SELECT ... FOR UPDATE` split at the ellipsis and forced
+    3 of 9 v2 scenes onto a per-span fallback."""
     from explainer import speech
     text = "SELECT ... FOR UPDATE locks the rows you read. That is the point."
-    n = Narration.from_text(text)
-    sp = speech.speak("s05", text)
-    assert len(sp.alignment.spans) == len(n.spans)
+    n = Narration.author(text)
+    assert len(n.spans) == 2, [s.text for s in n.spans]
+    sp = speech.speak("s05", n)
+    assert len(sp.alignment.spans) == 2
     assert sp.alignment.spans[-1].end == sp.audio.sample_count
+
+
+def test_the_partition_matches_by_construction(monkeypatch):
+    """W5: the spans and the chunks are the same list, not two algorithms that
+    happened to agree. MEASURED: v2 s05's 7 spans yield 1 chunk each alone and
+    6 chunks together, so a per-scene call cannot be trusted to partition."""
+    from explainer import speech
+    rows = [{"id": "sp_aaaaaaaaaa", "text": "Two doctors are on call tonight."},
+            {"id": "sp_bbbbbbbbbb", "text": "Both of them go off duty."},
+            {"id": "sp_cccccccccc", "text": "Nobody is left."}]
+    n = Narration.from_stored(rows)
+    sp = speech.speak("s05", n)
+    assert len(sp.alignment.spans) == 3
+    assert [s.span_id for s in sp.alignment.spans] == [r["id"] for r in rows]
+    assert sp.alignment.spans[-1].end == sp.audio.sample_count
+
+
+def test_speak_refuses_raw_text():
+    """The render path must not be able to reach the authoring constructor."""
+    from explainer import speech
+    with pytest.raises(TypeError) as e:
+        speech.speak("s01", "some narration")
+    assert "from_stored" in str(e.value)
 
 
 # ------------------------------------------------------------ word timings

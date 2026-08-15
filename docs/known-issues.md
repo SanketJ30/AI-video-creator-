@@ -500,7 +500,7 @@ taking time from it to pay for the overruns is not available.
 
 ---
 
-## ISSUE-11 — span segmentation splits on an ellipsis, so spans and TTS chunks disagree · BLOCKING (worked around)
+## ISSUE-11 — span segmentation splits on an ellipsis, so spans and TTS chunks disagree · FIXED
 
 `Narration.from_text` treats `...` as a sentence terminator. On v2 s05 the
 narration contains `SELECT ... FOR UPDATE`, which becomes **two spans**:
@@ -535,6 +535,25 @@ it is visible rather than silently different from its neighbours.
 
 **Do not "fix" this by relaxing the alignment check.** The check is what caught
 it.
+
+### FIXED, 15 Aug 2026
+
+`spans.py` now masks every full stop that does not end a sentence before
+splitting — ellipses, `i.e.`/`e.g.` and friends, decimals and version numbers —
+and restores them after, so the text stays byte-identical. Tests cover
+`SELECT ... FOR UPDATE`, `i.e.`, `e.g.`, `1.5 GB` and `16.2`, plus a guard that
+real sentence boundaries still split.
+
+On v2 this took the stored narration from 46 spans to 40 and the mismatched
+scenes from 3 to 1.
+
+**The remaining 1 is why per-scene synthesis was abandoned entirely.** MEASURED
+on v2 s05: each of its 7 spans yields exactly 1 piper chunk when synthesised
+alone, but all 7 together yield 6. piper's splitter merges differently depending
+on surrounding context, so no amount of fixing OUR splitter makes the two agree.
+Synthesis is now per span by construction — see **W5** in
+`week5-decisions-needed.md`. The partition matches because it is never derived
+twice.
 
 ---
 

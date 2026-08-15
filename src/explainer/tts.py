@@ -118,7 +118,7 @@ class SceneAudio:
     # Per-phoneme spans in samples at `sample_rate`, in emission order.
     phonemes: list[dict] = field(default_factory=list)
     # One entry per synthesis chunk: piper emits exactly one chunk per
-    # sentence, and `Narration.from_text` segments on the same boundaries, so
+    # sentence, and `Narration.author` segments on the same boundaries, so
     # these are span durations MEASURED rather than estimated. `align.py`
     # checks the counts match and refuses to guess when they do not.
     chunks: list[dict] = field(default_factory=list)

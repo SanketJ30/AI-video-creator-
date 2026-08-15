@@ -7,7 +7,7 @@ spans. This is what makes R3's span anchoring *resolvable*: a cue anchored to
 ## Two levels, and only one of them is measured
 
 **Span boundaries are MEASURED.** piper emits exactly one synthesis chunk per
-sentence, and `Narration.from_text` segments on sentence boundaries, so the
+sentence, and `Narration.author` segments on sentence boundaries, so the
 chunks and the spans are the same partition of the same text. Each span's start
 and end are read off the audio, not estimated. `SPAN_METHOD` records this.
 
@@ -179,7 +179,7 @@ def align(scene_ref: str, narration: Narration, audio) -> SceneAlignment:
         raise AlignmentError(
             f"{scene_ref}: {len(spans)} spans but {len(chunks)} TTS chunks. "
             f"These must be the same partition of the same text — piper emits "
-            f"one chunk per sentence and Narration.from_text segments on "
+            f"one chunk per sentence and Narration.author segments on "
             f"sentence boundaries. A positional guess here would mistime every "
             f"cue in the scene, so it is refused.\n"
             f"  spans:  {[s.text[:40] for s in spans]}\n"

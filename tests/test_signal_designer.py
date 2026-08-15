@@ -20,7 +20,7 @@ TEXT = ("The old version keeps its xmin. A new version gets xmin 105. "
 
 
 def narration() -> Narration:
-    return Narration.from_text(TEXT)
+    return Narration.author(TEXT)
 
 
 def scene(ref="s01", template="labelled_diagram", slots=None, narr=None):

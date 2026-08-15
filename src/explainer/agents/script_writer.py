@@ -11,7 +11,7 @@ order they come in.
 
 ## Four things this module does in CODE, not in the prompt
 
-**Segmentation into spans.** Narration goes through `Narration.from_text()` and
+**Segmentation into spans.** Narration goes through `Narration.author()` and
 is persisted as span JSON (CHALLENGES R4). Spans are the join key every later
 stage anchors to — cues, translations, captions, the timing resolver — and
 asking the model to emit them would make the join key a matter of opinion.
@@ -480,7 +480,7 @@ def _assemble(filled: list[dict], form: list[gagne.SlotSpec],
             slot=slot,
             objective_ref=objective.ref,
             # R4: segmented at authoring time, never stored as flat prose.
-            narration=Narration.from_text(f["narration"]),
+            narration=Narration.author(f["narration"]),
             timing_sensitivity=f["timing_sensitivity"],
             element_interactivity=f["element_interactivity"],
             # Computed in code against a running set, in slot order.

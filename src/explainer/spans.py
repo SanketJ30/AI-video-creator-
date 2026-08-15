@@ -132,17 +132,73 @@ class Narration:
     # ------------------------------------------------------------ authoring
 
     @classmethod
-    def from_text(cls, text: str) -> "Narration":
+    def author(cls, text: str) -> "Narration":
         """Segment authored prose into spans at clause boundaries (R4).
 
-        Deliberately conservative: sentence terminators, then long clauses split
-        at semicolons and em dashes. Over-splitting costs nothing (cues just get
-        finer anchors); under-splitting means a cue cannot point at the words it
-        means.
+        **The authoring path, and the only place span ids are minted.** Call it
+        once, when narration is first written, and persist the result. Every
+        later reader uses `from_stored`.
+
+        Ids come from `uuid4`, so two calls on the same string return DIFFERENT
+        ids. That is fine at authoring time — the ids just have to be unique —
+        and catastrophic anywhere else, which is why the two paths are now
+        different methods rather than one method used carefully. See
+        `from_stored`.
+
+        Segmentation is deliberately conservative: sentence terminators (with
+        abbreviations, decimals and ellipses masked — ISSUE-11), then long
+        clauses split at semicolons and em dashes. Over-splitting costs little;
+        under-splitting means a cue cannot point at the words it means.
         """
         chunks = _segment(text)
         return cls([Span(id=new_span_id(), text=c, order=i)
                     for i, c in enumerate(chunks)])
+
+    @classmethod
+    def from_stored(cls, rows: list[dict]) -> "Narration":
+        """Rebuild narration from persisted `scenes.narration` rows.
+
+        **The only correct way to read narration that already exists.** Every id
+        comes from storage; nothing is minted and nothing is re-segmented.
+
+        R3 anchors a cue to a span id. `author` mints fresh uuids, so
+        re-segmenting stored text yields ids no stored cue can match — and the
+        failure is silent, because the new ids are perfectly well-formed. This
+        was live in the first draft of the render path and produced a video in
+        which no cue resolved.
+
+        A row without an id is refused rather than assigned one: an id that
+        cannot be recovered is not a defaulting problem, it is data loss.
+        """
+        spans: list[Span] = []
+        for i, r in enumerate(rows or []):
+            span_id = r.get("id") or r.get("spanId")
+            if not span_id:
+                raise ValueError(
+                    f"stored narration row {i} has no span id: {r!r}. R3 "
+                    f"anchoring needs it and it cannot be regenerated — "
+                    f"`author` mints new uuids, so a replacement id would "
+                    f"orphan every cue that points here.")
+            spans.append(Span(id=span_id, text=r.get("text") or "",
+                              order=int(r.get("order", i))))
+        return cls(spans)
+
+    @classmethod
+    def from_text(cls, text: str) -> "Narration":
+        """Removed. Pick the path you actually mean.
+
+        This existed as one method used for two jobs, and the render path used
+        it to re-derive spans from stored text — which silently orphaned every
+        cue anchor (R3). It is a hard error now rather than a comment, because
+        a comment did not stop it.
+        """
+        raise TypeError(
+            "Narration.from_text is removed because it hid a silent R3 "
+            "failure. Use Narration.author(text) when narration is first "
+            "written and its ids are being minted, or "
+            "Narration.from_stored(rows) to read narration that already "
+            "exists. Re-segmenting stored text mints new ids and orphans every "
+            "cue anchored to the old ones.")
 
     def by_id(self, span_id: str) -> Span:
         for s in self.spans:
@@ -235,10 +291,59 @@ _SENTENCE_END = re.compile(r"(?<=[.!?])\s+")
 _SUBCLAUSE = re.compile(r"\s*[;—]\s*|\s+—\s+")
 _LONG = 18  # words; above this we look for a subclause boundary
 
+# ---------------------------------------------------------------------------
+# Not every full stop ends a sentence (ISSUE-11).
+#
+# The naive `(?<=[.!?])\s+` split cut `SELECT ... FOR UPDATE` into two spans on
+# real narration. That is not a cosmetic problem: a span is the unit a cue
+# anchors to (R3) and the unit TTS speaks, so `"SELECT ..."` became an utterance
+# on its own, a caption line on its own, and a cue target that points at half a
+# phrase. On v2 it forced 3 of 9 scenes onto a per-span synthesis fallback.
+#
+# This product's narration is technical prose. `i.e.`, `e.g.`, version numbers,
+# decimals and ellipses are not edge cases here — they are the register. So the
+# dots that are NOT sentence ends are masked before splitting and restored
+# after, which keeps the text byte-identical while fixing the boundaries.
+# ---------------------------------------------------------------------------
+
+# Masked with a control character that cannot occur in authored narration.
+_DOT = "\x00"
+
+_ELLIPSIS = re.compile(r"\.\s*\.\s*\.")
+
+# Abbreviations whose trailing dot is not a sentence end. Deliberately short:
+# every entry is one a technical script actually uses, and a long speculative
+# list would swallow real sentence boundaries.
+_ABBREVIATIONS = (
+    "i.e", "e.g", "etc", "cf", "vs", "viz", "al", "approx", "est",
+    "fig", "no", "vol", "ch", "sec", "pp", "ca",
+    "dr", "mr", "mrs", "ms", "prof", "st", "jr", "sr", "inc", "ltd", "co",
+)
+_ABBREV_RE = re.compile(
+    r"\b(?:" + "|".join(a.replace(".", r"\.") for a in _ABBREVIATIONS) + r")\.",
+    re.IGNORECASE)
+
+# A dot between two digits: 1.5, 0.85, version 4.0.
+_DECIMAL = re.compile(r"(?<=\d)\.(?=\d)")
+
+
+def _mask_non_terminal_dots(text: str) -> str:
+    """Hide every full stop that does not end a sentence."""
+    text = _ELLIPSIS.sub(lambda m: m.group(0).replace(".", _DOT), text)
+    text = _ABBREV_RE.sub(lambda m: m.group(0).replace(".", _DOT), text)
+    text = _DECIMAL.sub(_DOT, text)
+    return text
+
+
+def _unmask(text: str) -> str:
+    return text.replace(_DOT, ".")
+
 
 def _segment(text: str) -> list[str]:
+    text = _mask_non_terminal_dots(text.strip())
     out: list[str] = []
-    for sentence in _SENTENCE_END.split(text.strip()):
+    for sentence in _SENTENCE_END.split(text):
+        sentence = _unmask(sentence)
         sentence = sentence.strip()
         if not sentence:
             continue

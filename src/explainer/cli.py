@@ -23,6 +23,7 @@ from . import manifest as manifest_mod
 from .agents import objective_extractor
 from .config import settings
 from .orchestrator import load_video
+from .spans import Narration
 
 app = typer.Typer(add_completion=False, no_args_is_help=True,
                   help="AI-native explainer video pipeline (PRD v4).")
@@ -822,6 +823,60 @@ def script_show(slug: str, video_ref: str,
     typer.echo(f"{len(scenes)} scenes, {total_spans} spans, {len(findings)} findings")
 
 
+@script_app.command("reauthor-spans")
+def script_reauthor_spans(slug: str, video_ref: str,
+                          yes: bool = typer.Option(False, "--yes")) -> None:
+    """Re-segment stored narration after a segmentation fix (ISSUE-11).
+
+    The narration TEXT is unchanged — this is not a regeneration and no model
+    is called. Only the span boundaries and therefore the span IDS change.
+
+    **That invalidates every cue in the video**, because R3 anchors a cue to a
+    span id and the ids are minted fresh. `storyboard plan` must be re-run
+    afterwards. This is destructive and says so rather than quietly leaving
+    cues pointing at spans that no longer exist.
+    """
+    from .agents import script_writer as sw
+    with db.tx() as conn:
+        course_id, video = _script_context(conn, slug, video_ref)
+        rows = sw.load(conn, str(video["id"]))
+        if not rows:
+            typer.echo(f"no script for '{video_ref}'", err=True)
+            raise typer.Exit(1)
+
+        plan = []
+        for r in rows:
+            text = " ".join(sp["text"] for sp in (r["narration"] or []))
+            before = len(r["narration"] or [])
+            after = Narration.author(text)
+            plan.append((r, after, before, len(after.spans)))
+
+        changed = [p for p in plan if p[2] != p[3]]
+        cues = sum(len((r["visual_spec"] or {}).get("cues") or [])
+                   for r, *_ in plan)
+        for r, _, b, a in plan:
+            mark = "  <-- resegmented" if b != a else ""
+            typer.echo(f"  {r['ref']:6} {b:3} -> {a:3} spans{mark}")
+        typer.echo("")
+        if not changed:
+            typer.echo("segmentation is already current; nothing to do")
+            raise typer.Exit(0)
+        typer.echo(err(f"{len(changed)} scene(s) resegmented. Every span id in "
+                       f"this video is reminted, which orphans all {cues} "
+                       f"cue(s). Re-run `storyboard plan` after this.",
+                       fg=typer.colors.YELLOW))
+        if not yes:
+            typer.confirm("proceed?", abort=True)
+
+        for r, narration, _, _ in plan:
+            db.execute(conn, """
+                update scenes set narration = %s, visual_spec = '{}'::jsonb
+                 where video_id = %s and ref = %s
+            """, (jsonlib.dumps(narration.to_json()), str(video["id"]), r["ref"]))
+    typer.echo(f"reauthored {len(plan)} scene(s); visual_spec emptied "
+               f"(the column is NOT NULL, so it is {{}} rather than null)")
+
+
 @script_app.command("gates")
 def script_gates(slug: str, video_ref: str,
                  save: bool = typer.Option(False, "--save",
@@ -897,10 +952,10 @@ def storyboard_plan(slug: str, video_ref: str,
             rows = sw.load(conn, str(video["id"]))
             try:
                 # R3: the signal designer must see the STORED span ids, not
-                # ids re-derived from text — `Narration.from_text` is not
+                # ids re-derived from text — minting new ids is not
                 # stable, so a regenerated id anchors nothing. See speech.py.
                 sd_rows = [{**r, "narration":
-                            speech.StoredNarration.from_rows(r["narration"])}
+                            Narration.from_stored(r["narration"])}
                            for r in rows]
                 splan = sd.design(conn, course_id, video, sd_rows)
             except Escalated as e:
@@ -1115,7 +1170,7 @@ def _video_timeline(conn, slug: str, video_ref: str):
         raise LookupError(f"no script for '{video_ref}'")
     entries = []
     for r in rows:
-        nar = speech.StoredNarration.from_rows(r["narration"])
+        nar = Narration.from_stored(r["narration"])
         sp = speech.speak(r["ref"], nar)
         spec = r["visual_spec"] or {}
         entries.append({"ref": r["ref"], "speech": sp,

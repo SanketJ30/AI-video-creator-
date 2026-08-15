@@ -104,3 +104,47 @@ typography (§16.1) should not ship against estimated timings.
 
 **Chosen: 2**, with the root cause logged as ISSUE-11 for whoever owns R4. Two
 of v2's nine scenes (s05, s07) currently use the fallback.
+
+---
+
+## W5 — synthesis is now per SPAN, not per scene (your step-1 instruction changed)
+
+**Where:** `speech.speak`. **Your instruction said:** *"Per-scene audio, one call
+per scene, not per span."* I have deviated and want it reviewed.
+
+**Why.** Per-scene synthesis recovers span boundaries from piper's own
+per-sentence chunking, which only works while two independent sentence splitters
+agree. MEASURED on v2 s05:
+
+```
+each of the 7 spans synthesised ALONE   -> exactly 1 chunk each
+all 7 synthesised TOGETHER              -> 6 chunks
+```
+
+piper merges differently depending on surrounding context, so the same span
+yields a different partition according to what sits next to it. That is not
+something a better splitter on our side can fix — fixing `spans.py` (ISSUE-11)
+took v2 from 3 mismatched scenes to 1, and *one silent misalignment per video* is
+the same class of problem as three.
+
+When the partitions disagree, `align` refuses to guess and the scene falls back
+anyway — so per-scene synthesis was already becoming per-span, unpredictably,
+on whichever scenes happened to trip it.
+
+**Options**
+
+1. **Per span, always** — the partition matches by construction, because it is
+   never derived twice. Cost: no prosody carry across a sentence boundary.
+2. **Per scene with the fallback** — the previous behaviour. Cost: a
+   context-dependent silent misalignment class, and inconsistent prosody
+   *between scenes* depending on which ones fell back.
+3. **Per scene, and make our splitter match piper's exactly** — not achievable
+   against a splitter we do not control and whose behaviour is context-sensitive.
+
+**Recommendation and chosen: 1.** The prosody cost is small — piper already
+resets prosody at every sentence internally and spans are sentences — and it
+eliminates a failure that is silent, context-dependent, and mistimes every cue in
+an affected scene. Option 2 pays the same prosody cost on an unpredictable subset
+while keeping the bug.
+
+**Reversible in one function** if you disagree: `speech.speak` is four lines.
