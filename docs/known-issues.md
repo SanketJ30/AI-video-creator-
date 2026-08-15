@@ -1310,3 +1310,45 @@ keeps the layer for the scene's duration.
 honours it only on macOS, so it fixed nothing on this host and would have made
 the same closure render different bytes on a different operating system. The OS
 is not in the closure (§11.3) — a determinism hazard dressed as a fix.
+
+
+---
+
+## ISSUE-23 — two cues on one span make a degenerate focus range · OPEN
+
+**Measured on the delivered MP4**, in the last two frames of s09: the key phrase
+snaps from full signal blue to a duller blue — 2050 sampled pixels, max per-pixel
+delta 40.
+
+`focusOf` decays a cue's emphasis when a LATER cue takes over, which is §8's "one
+dominant visual question" doing the right thing. It picks the release time as
+*the next cue with a different target* — **without checking that it is actually
+later**:
+
+```ts
+const next = ordered.slice(i + 1).find((n) => n.target !== target);
+focusAmount(seconds, c.atSeconds, next ? next.atSeconds : null)
+```
+
+s09 has two cues anchored to the SAME span, `sp_91e3c03165` — `highlight` on
+`phrase` and `scale_pulse` on `emphasis`, both at the same offset. That is not
+unusual; it is what the signal designer does whenever one sentence carries two
+signals. So `release == rise start`, and the interpolate input range becomes
+`[t, t+0.34, t, t+0.34]` — not monotonically increasing, which `interpolate`
+does not promise anything sane about.
+
+**Fix (not applied):** treat a later cue as a release only when it is strictly
+later than the end of this cue's rise; otherwise persist, which is already the
+`null` branch's behaviour. One guard in `focusOf`.
+
+**Not applied because it costs a full re-render** (~35 min, all nine scenes
+cold — `render_source_version` is in the closure), and applying it would leave
+the delivered MP4 not matching the code that produced it. Sanket's call whether
+to spend that cycle now or roll it into the next render.
+
+### Five smaller residuals, NOT diagnosed
+
+The same profile leaves five sub-100 ms events of 183–291 px (0.14–0.22% of the
+frame) at s01 f249/f382, s05 f499/f749, s07 f249. They are above the dither
+floor, so they are real changes, but small. Recorded so that "6 remaining" is not
+quietly read as "1 remaining and 5 that do not exist".
