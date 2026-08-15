@@ -2,7 +2,7 @@ import React from "react";
 import { AbsoluteFill, useCurrentFrame, useVideoConfig } from "remotion";
 import {
   canvas, color, columns, contentHeight, contentLeft, contentTop, contentWidth,
-  font, space, type as typeScale,
+  font, motion, space, type as typeScale,
 } from "./tokens";
 import {
   build, focusAmount, focusScale, mix, reveal, resolveAmount, started,
@@ -120,6 +120,28 @@ const STATE_SURFACE: Record<string, string> = {
   resolved: color.answerSoft,
 };
 
+/**
+ * WHEN a scene's state appears, decided by what the role MEANS.
+ *
+ * A single default was wrong, and s04 is the case that proves it: a 74.5 s scene
+ * whose subject is an invariant being violated read `broken` only for its last
+ * 7.4 s, because every state was driven by §10.4's RESOLVE progress of 0.9.
+ *
+ * `broken` and `caution` are CONDITIONS that hold for the scene — the invariant
+ * is violated for the whole of s04, not at the end of it. `resolved` is an
+ * ARRIVAL, and a late reveal is exactly what §10.4 describes: "transition from
+ * neutral/signal to answer state". So the verb still fits `resolved`; it never
+ * fitted the other two.
+ *
+ * 0.15 rather than 0: the state should land after the scene's opening REVEAL
+ * has settled, so the frame is not already tinted before anything is on it.
+ */
+const STATE_ONSET: Record<string, number> = {
+  broken: 0.15,
+  caution: 0.15,
+  resolved: 0.9,
+};
+
 // ------------------------------------------------------------ the shell
 
 export const Scene: React.FC<SceneProps> = ({
@@ -139,14 +161,26 @@ export const Scene: React.FC<SceneProps> = ({
   // the cue's span anchor (R3); this only shapes the moment around it. A
   // target's focus is the strongest of the cues pointing at it.
   const ordered = [...cues].sort((a, b) => a.atSeconds - b.atSeconds);
+  const motionFocusSeconds = motion.focus.ms / 1000;
   const focusOf = (target: string): number =>
     ordered.reduce((best, c, i) => {
       if (c.target !== target) return best;
       // §8: one dominant visual question. Emphasis persists until a LATER cue
       // takes over, then decays — attention MOVES rather than blinking off.
+      //
+      // STRICTLY later, and later than the END of this cue's rise (ISSUE-23).
+      // Two cues anchored to the SAME span is the signal designer's normal
+      // output whenever one sentence carries two signals — s09 has exactly
+      // that — and without this guard `release === rise start`, which makes
+      // focusAmount's input range [t, t+rise, t, t+rise]. That is not
+      // monotonically increasing and `interpolate` promises nothing about it;
+      // measured, it snapped the phrase's colour over the scene's last two
+      // frames. A cue that does not supersede this one leaves it persisting,
+      // which is the `null` branch and the correct reading of §8.
+      const riseEnd = c.atSeconds + motionFocusSeconds;
       const next = ordered
         .slice(i + 1)
-        .find((n) => n.target !== target);
+        .find((n) => n.target !== target && n.atSeconds > riseEnd);
       return Math.max(
         best,
         focusAmount(seconds, c.atSeconds, next ? next.atSeconds : null),
@@ -221,7 +255,8 @@ export const Scene: React.FC<SceneProps> = ({
             bottom: safeBottomPx,
             backgroundColor: STATE_SURFACE[resolutionState],
             borderLeft: `${space.xs}px solid ${STATE_INK[resolutionState]}`,
-            opacity: resolveAmount(frame, fps, durationInFrames),
+            opacity: resolveAmount(frame, fps, durationInFrames,
+                                   STATE_ONSET[resolutionState]),
           }}
         />
       ) : null}
@@ -514,7 +549,8 @@ const Body: React.FC<{
                 padding: `${space.xs}px ${space.md}px`,
                 borderRadius: 8,
                 border: `1px solid ${color.signalBorder}`,
-                backgroundColor: color.surfaceSignal,
+                // Bg-Hover tier, not Bg — see the note on `surfaceSignalHover`.
+                backgroundColor: color.surfaceSignalHover,
                 color: color.ink,
                 fontSize: px(t.bodyStrong),
                 fontWeight: t.bodyStrong.weight,
@@ -691,7 +727,7 @@ const Body: React.FC<{
                   // resolved row takes the answer surface — §3's distinction.
                   backgroundColor:
                     rowFocus > 0.001
-                      ? mix(color.surface, color.surfaceSignal, rowFocus)
+                      ? mix(color.surface, color.surfaceSignalHover, rowFocus)
                       : color.surface,
                   lineHeight: t.body.line,
                   ...buildStep(i, rows.length),
@@ -775,7 +811,7 @@ const Body: React.FC<{
                     padding: `${space.md}px`,
                     borderRadius: 10,
                     border: `1px solid ${mix(color.structure, color.signalBorder, f)}`,
-                    backgroundColor: mix(color.surface, color.surfaceSignal, f),
+                    backgroundColor: mix(color.surface, color.surfaceSignalHover, f),
                     ...buildStep(i, flow.length),
                   }}
                 >
@@ -884,7 +920,7 @@ const Body: React.FC<{
                     fontWeight: t.h3.weight,
                     padding: `${space.md}px ${space.lg}px`,
                     border: `1px solid ${mix(color.structure, color.signalBorder, f)}`,
-                    backgroundColor: mix(color.surface, color.surfaceSignal, f),
+                    backgroundColor: mix(color.surface, color.surfaceSignalHover, f),
                     borderRadius: 10,
                     ...emphasis(f),
                     ...buildStep(i, nodes.length),

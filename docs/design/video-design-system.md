@@ -189,6 +189,48 @@ Map the existing tokens as follows.
 | `error` | `colorError` | `#D13845` | Wrong/broken/failure state |
 | `error-soft` | `colorErrorBg` | `#FFF5F5` | Error container |
 
+### Video is not a screen UI: the soft container tiers need one rung more
+
+**Added after measuring the finished MP4 — a general lesson, not a one-off fix.**
+
+Soft container tokens tuned for a screen at reading distance **do not survive
+H.264 at phone size.** WCAG ratio against `surface`:
+
+| token | value | vs surface |
+|---|---:|---:|
+| `signal-soft` | `#F5FAFF` | 1.050:1 |
+| `answer-soft` | `#F7FDFA` | 1.030:1 |
+| `warning-soft` | `#FFFDF5` | 1.018:1 |
+| `error-soft` | `#FFF5F5` | 1.070:1 |
+| `surface-signal-hover` | `#E6F3FF` | **1.127:1** |
+
+A screen UI reads these on a calibrated monitor at reading distance, next to
+other white cards that give the fill an edge to sit against. A video is watched
+at phone size *after* compression, and H.264's 4:2:0 chroma subsampling and
+quantisation both operate at a scale larger than a 1.02:1 step. Measured on the
+finished video: an `answer-soft` fill covering **69% of the frame** was
+indistinguishable from white. The only part of the state treatment a viewer
+could actually see was a 12 px rule in the saturated role colour.
+
+**The rule this gives:** where a screen UI uses the `Bg` tier for an emphasised
+surface, video uses the **`Bg-Hover` tier**. This is not a new colour — §3's
+"do not create new colors" holds — it is one rung up a ramp the design system
+already defines.
+
+**Applied to `signal`, and BLOCKED for the other three.** §3's table above gives
+a Bg-Hover tier for the signal role only. It does not list `colorSuccessBgHover`,
+`colorWarningBgHover` or `colorErrorBgHover`, and interpolating them would be
+creating three colours. Those three carry the scene state (`broken`, `caution`,
+`resolved`), so they matter *more* than signal does. Four values from the source
+system unblock it; a border tier for the three roles would be better still, since
+signal's `colorPrimaryBorder` #99CCFF measures 1.689:1.
+
+**The general form, worth applying beyond colour:** any token chosen for
+legibility on a screen has been tuned against a viewing distance, a display and
+no compression. Video changes all three. Type size already got this treatment —
+§6's 24 px floor exists for the same reason — and contrast is the second place it
+bites.
+
 ### Important distinction
 
 Do not use blue for everything.

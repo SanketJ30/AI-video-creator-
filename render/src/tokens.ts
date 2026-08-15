@@ -35,9 +35,38 @@ export const color = {
   surface: "#FFFFFF",
   /** colorBgLayout — secondary canvas, quiet region */
   surfaceSubtle: "#FAFAFA",
-  /** colorPrimaryBg — highlighted area */
+  /**
+   * colorPrimaryBg — highlighted area.
+   *
+   * NOT USED as an emphasis surface; `surfaceSignalHover` is. See below.
+   */
   surfaceSignal: "#F5FAFF",
-  /** colorPrimaryBgHover — stronger highlight state */
+  /**
+   * colorPrimaryBgHover — stronger highlight state, and the tier this renderer
+   * uses wherever a surface means "emphasised".
+   *
+   * ## VIDEO NEEDS MORE SEPARATION THAN A SCREEN UI
+   *
+   * MEASURED, WCAG ratio against `surface`:
+   *
+   *     signalSoft   #F5FAFF   1.050:1     <- the Bg tier
+   *     answerSoft   #F7FDFA   1.030:1
+   *     warningSoft  #FFFDF5   1.018:1
+   *     errorSoft    #FFF5F5   1.070:1
+   *     surfaceSignalHover #E6F3FF 1.127:1 <- the Bg-Hover tier
+   *
+   * The Bg tier is a screen-UI container colour: it is read on a calibrated
+   * monitor at reading distance, next to other white cards that give it an
+   * edge to be seen against. A video is watched at phone size after H.264,
+   * whose 4:2:0 chroma subsampling and quantisation both operate at a scale
+   * larger than a 1.02:1 step. A 69%-of-frame `answerSoft` fill measured on
+   * the finished MP4 was indistinguishable from white.
+   *
+   * So this is not "the design system is wrong" — it is the same tokens read
+   * in a medium they were not tuned for. §3 says "do not create new colors",
+   * and this does not: it steps one rung up a ramp the design system already
+   * defines.
+   */
   surfaceSignalHover: "#E6F3FF",
 
   /** colorText — primary readable text */
@@ -65,19 +94,49 @@ export const color = {
   /** colorPrimaryBorder — signal containers */
   signalBorder: "#99CCFF",
 
+  /*
+    BLOCKED, and deliberately not worked around.
+
+    The three soft tokens below have the same video-vs-screen problem as
+    `signalSoft` (1.018–1.070:1 against surface — see `surfaceSignalHover`), and
+    they carry the scene state, so they matter more than signal does: `broken`,
+    `caution` and `resolved` are rendered as containers in exactly these colours.
+
+    The fix is the same one rung up the ramp — but §3's mapping table gives a
+    Bg-Hover tier for the SIGNAL role only. It has `colorPrimaryBgHover`; it does
+    not list `colorSuccessBgHover`, `colorWarningBgHover` or `colorErrorBgHover`,
+    and the source design system is not in this repo, so those values cannot be
+    read from anywhere here.
+
+    §3 opens with "Do not create new colors." Interpolating a plausible hover
+    tier would be creating three, so these stay on the Bg tier until the real
+    values are supplied. What is needed is four numbers, not a design decision:
+
+        colorSuccessBgHover   ->  answerSoftHover
+        colorWarningBgHover   ->  warningSoftHover
+        colorErrorBgHover     ->  errorSoftHover
+
+    (`colorSuccessBorder` / `colorWarningBorder` / `colorErrorBorder` would be
+    better still: the signal equivalent, `colorPrimaryBorder` #99CCFF, measures
+    1.689:1 — an order of separation above the Bg-Hover tier's 1.127:1.)
+
+    Until then the visible state signal is the 12 px rule in the saturated role
+    colour, which does read: error 4.814:1, answer 2.368:1, warning 2.051:1.
+  */
+
   /** colorSuccess — confirmed / correct / resolution */
   answer: "#05C170",
-  /** colorSuccessBg — answer container */
+  /** colorSuccessBg — answer container. BLOCKED at 1.030:1, see above. */
   answerSoft: "#F7FDFA",
 
   /** colorWarning — caution / deserves attention */
   warning: "#FCA106",
-  /** colorWarningBg */
+  /** colorWarningBg. BLOCKED at 1.018:1, see above. */
   warningSoft: "#FFFDF5",
 
   /** colorError — wrong / broken / failure */
   error: "#D13845",
-  /** colorErrorBg */
+  /** colorErrorBg. BLOCKED at 1.070:1, see above. */
   errorSoft: "#FFF5F5",
 } as const;
 

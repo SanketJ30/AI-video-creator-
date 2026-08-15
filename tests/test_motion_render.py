@@ -259,6 +259,69 @@ def test_no_visible_change_happens_in_a_single_frame(tmp_path):
         "switch, not a motion verb:\n  " + "\n  ".join(bad))
 
 
+def _role_pixels(scene_hash: str, frame_no: int, hex_colour: str) -> int:
+    """Pixels within 40 RGB units of a role token, on one full-resolution frame."""
+    import numpy as np
+    import imageio_ffmpeg
+    import tempfile
+
+    tmp = pathlib.Path(tempfile.mkdtemp())
+    try:
+        src = tmp / "s.mov"
+        src.write_bytes(render.store().get(scene_hash))
+        out = subprocess.run(
+            [imageio_ffmpeg.get_ffmpeg_exe(), "-hide_banner", "-loglevel", "error",
+             "-i", str(src), "-vf", f"select=eq(n\\,{frame_no})", "-frames:v", "1",
+             "-pix_fmt", "rgb24", "-f", "rawvideo", "-"], capture_output=True)
+        a = np.frombuffer(out.stdout, dtype=np.uint8).reshape(-1, 3).astype(np.float32)
+        t = np.array([int(hex_colour[i:i + 2], 16) for i in (1, 3, 5)],
+                     dtype=np.float32)
+        return int(np.count_nonzero(((a - t) ** 2).sum(axis=1) <= 40 ** 2))
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_a_condition_state_holds_but_an_arrival_state_arrives():
+    """The onset of a scene's state follows from what the ROLE MEANS.
+
+    s04 is the case that forced this: a 74.5 s scene whose subject is an
+    invariant being violated read `broken` only for its last 7.4 s, because
+    every state was driven by §10.4's RESOLVE progress of 0.9.
+
+    `broken` and `caution` are CONDITIONS — they hold for the scene. `resolved`
+    is an ARRIVAL, and §10.4's late "transition from neutral/signal to answer
+    state" is exactly right for it and only for it.
+
+    Measured on a 180-frame scene: the 12 px state rule is 11016 px, absent at
+    5% for every state, present from 25% for the conditions, and present for
+    the arrival only after frame 174 (97%) — the RESOLVE band runs 162→179, so
+    a sample at 95% is still mid-fade and correctly matches nothing.
+    """
+    slots = {"columns": ["Remedy", "Cost"],
+             "rows": [{"cells": ["SERIALIZABLE", "retry"]}]}
+    frames = 180
+    rule_px = 11016
+
+    for state, token in (("broken", "#D13845"), ("caution", "#FCA106")):
+        h = render.render_scene(f"on_{state}", "table_build", slots, [], frames,
+                                resolution_state=state).hash
+        early = _role_pixels(h, int(frames * 0.25), token)
+        assert early == rule_px, (
+            f"{state} is a CONDITION and must hold from early in the scene; "
+            f"found {early} px of {token} at 25%")
+        assert _role_pixels(h, int(frames * 0.05), token) == 0, (
+            f"{state} must land after the opening REVEAL, not before it")
+
+    h = render.render_scene("on_resolved", "table_build", slots, [], frames,
+                            resolution_state="resolved").hash
+    assert _role_pixels(h, int(frames * 0.25), "#05C170") == 0, (
+        "resolved is an ARRIVAL — a scene must not read as answered from its "
+        "first quarter, or the reveal asserts the conclusion before the "
+        "argument")
+    assert _role_pixels(h, int(frames * 0.99), "#05C170") == rule_px, (
+        "resolved must actually arrive by the end of the scene")
+
+
 def test_transition_is_not_implemented_in_the_renderer():
     """§10.5 operates between scenes, and §11.4 already models that as a
     first-class node with its own cache key. There is nothing to measure here,
