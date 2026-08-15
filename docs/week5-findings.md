@@ -12,22 +12,27 @@ below is n=1.
 
 ## 1. The headline numbers
 
-**There is an MP4.** `var/render/mvcc-write-skew-v2.mp4`, 8.26 MB.
+**There is an MP4.** `C:\Users\Sanket\projects\explainer-pipeline\var\render\mvcc-write-skew-v2.mp4`, 7.79 MB.
+
+> Re-rendered 15 Aug after the ISSUE-11 segmentation fix and the W5 switch to
+> per-span synthesis. Numbers below are from that run. The earlier run
+> (219.067 s, 46 spans) is superseded: it had 3 scenes on the per-span fallback
+> and 6 spans that were fragments rather than sentences.
 
 | | |
 |---|---|
-| **Measured runtime** | **219.07 s** (00:03:39.07) |
-| Resolved runtime | 219.067 s (6572 frames @ 30 fps) |
+| **Measured runtime** | **218.33 s** (00:03:38.33) |
+| Resolved runtime | 218.333 s (6550 frames @ 30 fps) |
 | **Drift, resolved vs measured** | **0.00 s** |
 | Budget | 240 s |
-| **Over/under budget** | **−20.93 s (8.7% under)** |
+| **Over/under budget** | **−21.67 s (9.0% under)** |
 | Format | 1920×1080, h264 High, yuv420p, 30 fps |
-| Audio | AAC mono 48 kHz, 181 kb/s, mean −17.4 dB, peak −0.0 dB |
+| Audio | AAC mono 48 kHz, 181 kb/s, mean −17.5 dB, peak −0.0 dB |
 | Narration audio alone | 207.5 s |
 | Silence padding | 11.5 s, almost all of it s04 |
 | **Byte-identical render** | **YES** — see §3 |
-| Scenes | 9 · Spans 46 · Cues 9 · Templates 5 |
-| Sidecars | `.vtt` (46 cues), `.srt`, `.words.json` (137 KB) |
+| Scenes | 9 · Spans 40 · Cues 9 · Templates 4 |
+| Sidecars | `.vtt` (40 cues), `.srt`, `.words.json` (136 KB) |
 
 **The measured runtime matches the resolved timeline exactly.** That is §11.4's
 whole argument working: integer frame counts, audio padded to the frame, concat
@@ -170,12 +175,18 @@ do nothing, which is the worse failure).
 This is the same shape as ISSUE-8: a check that measures form passing something
 that is wrong in substance.
 
-**1. The spans/TTS partition can disagree, and it did.** `spans.py` treats `...`
-as a sentence terminator, so `SELECT ... FOR UPDATE` becomes two spans while
-piper produces one chunk. v2 s05: 9 spans, 6 chunks. The hard error fired and
-refused to guess a mapping — correctly, because a positional guess would have
-mistimed every cue in the scene. Logged as **ISSUE-11**; worked around with
-per-span synthesis (3 of 9 scenes use it) because `spans.py` is off-limits.
+**1. Fixing our sentence splitter turned out not to be enough.** `spans.py`
+treated `...` as a sentence terminator, so `SELECT ... FOR UPDATE` became two
+spans while piper produced one chunk. ISSUE-11, now **fixed**: non-terminal dots
+(ellipses, `i.e.`, decimals, version numbers) are masked before splitting. v2
+went 46 → 40 spans and 3 → 1 mismatched scenes.
+
+The surviving one is the interesting part. MEASURED on s05: each of its 7 spans
+yields **exactly 1** piper chunk alone, and all 7 together yield **6**. piper
+merges by surrounding context, so no splitter of ours can be made to agree with
+it in general. Synthesis is now **per span by construction** (W5) — the spans and
+the chunks are the same list rather than two algorithms that happened to match.
+40 of 40 spans now align with no reconciliation.
 
 **2. `Narration.from_text` does not produce stable span ids.** Two calls on the
 same string returned `sp_86413ddd46` and `sp_939670a2cc`. Anything that
