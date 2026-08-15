@@ -55,6 +55,30 @@ from .rtime import RationalTime
 # beyond that, re-render at the new duration."
 MAX_SILENCE_PAD_SHARE = 0.15
 
+# ===========================================================================
+# AUTHORED AND UNREVIEWED — not from Sequence v0.2. One number.
+#
+# §15.3's 15% budget is about absorbing CONTRACTION, where the padding is
+# distributed across a scene by the timing model. Applied to a single trailing
+# block it treats "15% of this scene is silence somewhere" and "the last 11
+# seconds are silent" as the same thing, and they are not.
+#
+# MEASURED on v2 s04, the 90 s scene carrying the whole explanation: 79.09 s of
+# narration and 10.91 s of padding, ALL of it trailing, contiguous, zero
+# leading, zero interior. That is 12.1% — inside §15.3's budget, so no
+# FitProblem was raised, and the result was still eleven seconds of dead air
+# before the cut.
+#
+# 4% of the scene is the most that may sit at the end. It is a judgement, it is
+# not in the spec, and it is the number to argue with. The remainder is
+# redistributed at span boundaries, which is also where §9.3's settling beat
+# ("≥1.5 s of silence with the visual held after each new concept") would want
+# it — that rule is in DEFERRED_RULES and this is a crude precursor to it, not
+# an implementation of it.
+# ===========================================================================
+
+AUTHORED_MAX_TRAILING_SILENCE_SHARE = 0.04
+
 
 class ResolveError(RuntimeError):
     pass
@@ -94,6 +118,54 @@ class CueTiming:
 
 
 @dataclass
+class PadPlan:
+    """Where a rigid scene's silence goes.
+
+    `gaps[i]` is silence inserted AFTER span i; `trailing` is what remains at
+    the end. Carried to the mux so the audio is built with the gaps in it, and
+    applied to the span timings so cues and captions move with the words rather
+    than drifting behind them.
+    """
+
+    gaps: list[int] = field(default_factory=list)
+    trailing: int = 0
+
+    @property
+    def total(self) -> int:
+        return sum(self.gaps) + self.trailing
+
+    def to_json(self) -> dict:
+        return {"gaps": list(self.gaps), "trailing": self.trailing}
+
+
+def distribute_padding(n_spans: int, total_pad: int, duration_samples: int,
+                       max_trailing_share: float
+                       = AUTHORED_MAX_TRAILING_SILENCE_SHARE) -> PadPlan:
+    """Split a scene's silence into inter-span beats plus a trailing tail.
+
+    Everything above the trailing allowance is spread evenly across the span
+    boundaries. With one span there is no boundary to put a beat at, so it all
+    stays trailing and the caller sees that in the plan rather than in the
+    finished video.
+    """
+    if total_pad <= 0:
+        return PadPlan(gaps=[0] * max(0, n_spans - 1), trailing=0)
+
+    allowed_trailing = int(duration_samples * max_trailing_share)
+    boundaries = max(0, n_spans - 1)
+    if boundaries == 0 or total_pad <= allowed_trailing:
+        return PadPlan(gaps=[0] * boundaries, trailing=total_pad)
+
+    spread = total_pad - allowed_trailing
+    per = spread // boundaries
+    gaps = [per] * boundaries
+    # The first boundary absorbs the remainder so the plan sums exactly; a lost
+    # sample here is a frame-alignment failure later.
+    gaps[0] += spread - per * boundaries
+    return PadPlan(gaps=gaps, trailing=allowed_trailing)
+
+
+@dataclass
 class SceneTiming:
     scene_ref: str
     duration: RationalTime               # stored (R1), frame-aligned
@@ -104,6 +176,7 @@ class SceneTiming:
     cues: list[CueTiming] = field(default_factory=list)
     spans: list[dict] = field(default_factory=list)
     per_span_fallback: bool = False
+    pad_plan: PadPlan = field(default_factory=PadPlan)
 
     @property
     def frames(self) -> int:
@@ -123,6 +196,7 @@ class SceneTiming:
                 "silenceSamples": self.silence_samples,
                 "timingSensitivity": self.timing_sensitivity,
                 "perSpanFallback": self.per_span_fallback,
+                "padPlan": self.pad_plan.to_json(),
                 "cues": [c.to_json() for c in self.cues],
                 "spans": self.spans}
 
@@ -188,6 +262,25 @@ def resolve_cue(cue: dict, alignment, scene_duration: RationalTime) -> CueTiming
                      offset_ms=offset_ms, params=cue.get("params") or {})
 
 
+def _apply_padding(alignment, plan: PadPlan) -> None:
+    """Shift span and word timings so they sit after the beats inserted before
+    them. Mutates the alignment in place, before any cue is resolved.
+
+    A cue resolved against unshifted timings fires while the previous span is
+    still on screen, and the error grows with every gap — the last cue in a
+    16-span scene would be seven seconds early.
+    """
+    shift = 0
+    for i, span in enumerate(alignment.spans):
+        span.start += shift
+        span.end += shift
+        for w in span.words:
+            w.start += shift
+            w.end += shift
+        if i < len(plan.gaps):
+            shift += plan.gaps[i]
+
+
 def resolve_scene(scene_ref: str, speech, timing_sensitivity: str,
                   target_seconds: int | None,
                   cues: list[dict] | None = None) -> tuple[SceneTiming,
@@ -230,6 +323,13 @@ def resolve_scene(scene_ref: str, speech, timing_sensitivity: str,
         # Elastic (§15.3 strategy A): duration derived from the audio (R5).
         padded = rtime.pad_audio_to_frame(audio_samples)
 
+    # ISSUE-14: decide WHERE the silence goes before anything anchors to a
+    # time. Doing it after would leave every cue and caption pointing at the
+    # unpadded position and drifting further with each inserted beat.
+    n_spans = len(speech.alignment.spans)
+    plan = distribute_padding(n_spans, padded - audio_samples, padded)
+    _apply_padding(speech.alignment, plan)
+
     duration = RationalTime.from_samples(padded, rtime.SAMPLE_RATE)
     if not duration.is_frame_aligned():
         raise ResolveError(
@@ -245,7 +345,8 @@ def resolve_scene(scene_ref: str, speech, timing_sensitivity: str,
         padded_samples=padded, timing_sensitivity=timing_sensitivity,
         cues=resolved_cues,
         spans=[s.to_json() for s in speech.alignment.spans],
-        per_span_fallback=speech.per_span_fallback), problems
+        per_span_fallback=speech.per_span_fallback,
+        pad_plan=plan), problems
 
 
 def resolve(scenes: list[dict]) -> Timeline:

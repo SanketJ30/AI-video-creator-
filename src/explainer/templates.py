@@ -138,7 +138,21 @@ class Template:
     params: tuple[Param, ...]
     min_sec: float
     max_sec: float
-    supports_signalling: bool
+    # WHY THIS IS A REASON AND NOT A BOOLEAN.
+    #
+    # It used to be `supports_signalling: bool`, and setting it False silently
+    # switched off §9.2 — which states "every scene contains 1-3 signalling
+    # events, never zero" with no exceptions — for that template. On v2 that
+    # exempted 6 of 9 scenes, so two thirds of the video had no signalling and
+    # NOTHING REPORTED IT. The flag was mine; the rule is the spec's.
+    #
+    # A capability flag that disables a pedagogical rule has to carry its own
+    # justification and has to be visible where it takes effect. Empty means the
+    # template supports signalling, which is the default. A non-empty string is
+    # the stated reason it cannot, and `linter.check_signalling_exemption`
+    # surfaces that reason as an info finding on every scene it suppresses a
+    # rule for.
+    signalling_exemption: str = ""
     safe_area: SafeArea = field(default_factory=SafeArea)
     renderer: str = "agnostic"
     min_font_px: int = MIN_FONT_PX
@@ -156,6 +170,11 @@ class Template:
 
     def param_schema(self) -> dict:
         return {p.name: p.to_json() for p in self.params}
+
+    @property
+    def supports_signalling(self) -> bool:
+        """§9.2 applies unless this template states why it cannot."""
+        return not self.signalling_exemption
 
     def fits(self, seconds: float) -> bool:
         return self.min_sec <= seconds <= self.max_sec
@@ -184,10 +203,10 @@ TEMPLATES: dict[str, Template] = {
                 Param("focus", ParamType.TEXT, required=False,
                       description="node id the scene builds toward"),
             ),
-            min_sec=8, max_sec=120, supports_signalling=True),
+            min_sec=8, max_sec=120),
 
         Template(
-            name="state_timeline", version="1.0.0", kind=Kind.ANIMATED_DIAGRAM,
+            name="state_timeline", version="1.1.0", kind=Kind.ANIMATED_DIAGRAM,
             description="Parallel tracks advancing through time — two sessions, "
                         "two threads, a before/after. The one template where the "
                         "referent genuinely changes over time (§8).",
@@ -206,10 +225,10 @@ TEMPLATES: dict[str, Template] = {
                 Param("invariant", ParamType.TEXT, required=False,
                       description="a rule shown holding, then breaking"),
             ),
-            min_sec=15, max_sec=120, supports_signalling=True),
+            min_sec=15, max_sec=120),
 
         Template(
-            name="key_phrase", version="1.0.0", kind=Kind.KINETIC_TYPE,
+            name="key_phrase", version="1.1.0", kind=Kind.KINETIC_TYPE,
             description="One phrase, typeset large. §9.4's abridged near-paraphrase "
                         "lives here — never a full narration sentence.",
             params=(
@@ -218,10 +237,10 @@ TEMPLATES: dict[str, Template] = {
                 Param("emphasis", ParamType.TEXT, required=False,
                       description="the word carrying the stress"),
             ),
-            min_sec=3, max_sec=20, supports_signalling=False),
+            min_sec=3, max_sec=20),
 
         Template(
-            name="term_card", version="1.0.0", kind=Kind.KINETIC_TYPE,
+            name="term_card", version="1.1.0", kind=Kind.KINETIC_TYPE,
             description="A term, its one-line characteristic, and an icon. §9.2's "
                         "pre-training rule emits this when a scene introduces ≥3 "
                         "new terms.",
@@ -231,10 +250,10 @@ TEMPLATES: dict[str, Template] = {
                       description="one line, not a dictionary definition"),
                 Param("icon", ParamType.ASSET_REF, required=False),
             ),
-            min_sec=4, max_sec=15, supports_signalling=False),
+            min_sec=4, max_sec=15),
 
         Template(
-            name="series_build", version="1.0.0", kind=Kind.DATA_VIZ,
+            name="series_build", version="1.1.0", kind=Kind.DATA_VIZ,
             description="A chart that builds. §4.4's 'data coming to life'.",
             params=(
                 Param("title", ParamType.TEXT, required=False),
@@ -245,10 +264,10 @@ TEMPLATES: dict[str, Template] = {
                 Param("highlight", ParamType.TEXT, required=False,
                       description="series label the narration points at"),
             ),
-            min_sec=8, max_sec=90, supports_signalling=True),
+            min_sec=8, max_sec=90),
 
         Template(
-            name="table_build", version="1.0.0", kind=Kind.DATA_VIZ,
+            name="table_build", version="1.1.0", kind=Kind.DATA_VIZ,
             description="Rows revealed in order. Comparison where the cells are "
                         "the content.",
             params=(
@@ -264,7 +283,7 @@ TEMPLATES: dict[str, Template] = {
                                   "one string per column, in column order"),
                 Param("highlight_row", ParamType.INT, required=False),
             ),
-            min_sec=8, max_sec=90, supports_signalling=True),
+            min_sec=8, max_sec=90),
 
         Template(
             name="terminal_replay", version="1.0.0", kind=Kind.SCREEN_DEMO,
@@ -275,7 +294,7 @@ TEMPLATES: dict[str, Template] = {
                       description="each step is a command and its output"),
                 Param("caption", ParamType.TEXT, required=False),
             ),
-            min_sec=10, max_sec=120, supports_signalling=True),
+            min_sec=10, max_sec=120),
 
         Template(
             name="ui_walkthrough", version="1.0.0", kind=Kind.SCREEN_DEMO,
@@ -285,10 +304,10 @@ TEMPLATES: dict[str, Template] = {
                       description="screenshot or synthetic UI; absent means drawn"),
                 Param("steps", ParamType.STEP_LIST, max_items=8),
             ),
-            min_sec=10, max_sec=120, supports_signalling=True),
+            min_sec=10, max_sec=120),
 
         Template(
-            name="concept_illustration", version="1.0.0", kind=Kind.ILLUSTRATION,
+            name="concept_illustration", version="1.1.0", kind=Kind.ILLUSTRATION,
             description="A drawn metaphor for an abstract idea. §4.4 ranks this "
                         "below a rendered diagram — reach for it when there is "
                         "nothing structural to draw.",
@@ -300,20 +319,20 @@ TEMPLATES: dict[str, Template] = {
                 Param("caption", ParamType.TEXT, required=False,
                       description="the only text a viewer reads on this template"),
             ),
-            min_sec=4, max_sec=45, supports_signalling=False),
+            min_sec=4, max_sec=45),
 
         Template(
-            name="title_card", version="1.0.0", kind=Kind.TITLE_HOOK,
+            name="title_card", version="1.1.0", kind=Kind.TITLE_HOOK,
             description="The objective slot's line, typeset. §9.1 reuses the "
                         "objective verbatim as the scene title.",
             params=(
                 Param("title", ParamType.TEXT),
                 Param("subtitle", ParamType.TEXT, required=False),
             ),
-            min_sec=3, max_sec=15, supports_signalling=False),
+            min_sec=3, max_sec=15),
 
         Template(
-            name="cold_open", version="1.0.0", kind=Kind.TITLE_HOOK,
+            name="cold_open", version="1.1.0", kind=Kind.TITLE_HOOK,
             description="A concrete situation before any explanation. §4.4 puts "
                         "stock here specifically: 'a hook at the open, or a "
                         "real-world shot that grounds the problem'.",
@@ -332,7 +351,7 @@ TEMPLATES: dict[str, Template] = {
                 Param("asset", ParamType.ASSET_REF, required=False,
                       description="stock clip; absent means rendered"),
             ),
-            min_sec=5, max_sec=20, supports_signalling=False),
+            min_sec=5, max_sec=20),
     ]
 }
 
@@ -473,10 +492,28 @@ def check_registry() -> list[str]:
                 f"{t.name}: min_font_px {t.min_font_px} is under §11.6's {MIN_FONT_PX}")
         if not t.params:
             problems.append(f"{t.name}: no parameters — nothing to fill")
+    _check_exemptions(problems)
     return problems
 
 
 # ------------------------------------------------------------- persistence
+
+def _check_exemptions(problems: list[str]) -> None:
+    """An exemption switches off a stated spec rule, so it must justify itself.
+
+    A one-word reason is not a reason. This is deliberately picky because the
+    cost of a cheap exemption is a rule that stops applying and nobody noticing
+    — which is exactly what happened with the old boolean (ISSUE-13).
+    """
+    for t in TEMPLATES.values():
+        reason = t.signalling_exemption
+        if reason and len(reason.split()) < 6:
+            problems.append(
+                f"{t.name}: signalling_exemption must say WHY this template "
+                f"cannot host a cue, in a sentence a reviewer can argue with. "
+                f"Got {reason!r}. §9.2 says 'never zero' without exceptions, so "
+                f"an exemption is an override of the spec.")
+
 
 def sync(conn) -> int:
     """Upsert the registry into `templates` (migration 0001 + 0005).

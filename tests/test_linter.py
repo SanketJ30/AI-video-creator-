@@ -60,7 +60,7 @@ def test_a_clean_video_fires_nothing():
     construction and proves nothing about whether the rules are quiet on good
     work."""
     scenes = [
-        scene("s01", template="cold_open", cues=0,
+        scene("s01", template="cold_open", cues=1,
               slots={"premise": "two doctors on call",
                      # Required: without it the scene draws an empty frame.
                      "headline": "Nobody on call"}),
@@ -68,7 +68,7 @@ def test_a_clean_video_fires_nothing():
         scene("s03", template="term_card", cues=1,
               slots={"term": "write skew",
                      "characteristic": "disjoint writes"}),
-        scene("s04", template="key_phrase", cues=0,
+        scene("s04", template="key_phrase", cues=1,
               slots={"phrase": "both commit"}),
     ]
     assert sum(s.seconds for s in scenes) == 240
@@ -226,10 +226,39 @@ def test_zero_cues_on_a_signalling_template_fires():
     assert found and found[0].threshold == {"min": 1, "max": 3}
 
 
-def test_zero_cues_on_a_non_signalling_template_does_not_fire():
-    """ISSUE-5's exemption, visible here so a change to it breaks a test."""
+def test_zero_cues_now_fires_on_every_template():
+    """ISSUE-13: §9.2 says 'never zero' with no exceptions, and no template
+    claims an exemption any more. key_phrase used to be exempt and silently
+    switched the rule off."""
     s = scene(template="key_phrase", cues=0, slots={"phrase": "frozen"})
-    assert not L.check_cue_count(s)
+    assert "signalling_count" in rules(L.check_cue_count(s))
+
+
+def test_an_exemption_is_surfaced_rather_than_silent():
+    """The failure shape ISSUE-13 names: a capability flag disabling a
+    pedagogical rule with nothing reporting the override. If an exemption is
+    ever added back, every scene it suppresses a rule for says so."""
+    import dataclasses
+    from explainer import templates as T
+    original = T.get("key_phrase")
+    try:
+        T.TEMPLATES["key_phrase"] = dataclasses.replace(
+            original,
+            signalling_exemption="a single typeset phrase has no second "
+                                 "element to direct attention away from")
+        s = scene(template="key_phrase", cues=0, slots={"phrase": "frozen"})
+        found = L.check_signalling_exemption(s)
+        assert found and found[0].severity == "info"
+        assert found[0].rule == "signalling_rule_suppressed"
+        assert "never zero" in found[0].message
+        assert found[0].measured["exemption_reason"]
+    finally:
+        T.TEMPLATES["key_phrase"] = original
+
+
+def test_no_exemption_means_no_finding():
+    s = scene(template="key_phrase", cues=1, slots={"phrase": "frozen"})
+    assert not L.check_signalling_exemption(s)
 
 
 def test_an_unknown_template_in_a_stored_spec_is_blocking():

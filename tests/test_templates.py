@@ -77,13 +77,26 @@ def test_fitting_filters_by_duration_band():
     assert "key_phrase" not in fits            # 3-20
 
 
-def test_fitting_can_require_signalling_support():
-    """§9.2 wants 1-3 signalling events per scene; a template that cannot host
-    a cue constrains what the signal designer may do."""
+def test_every_template_supports_signalling_by_default():
+    """ISSUE-13. §9.2 states 'never zero' without exceptions, so the default is
+    that the rule applies. An exemption is now an explicit, justified override
+    rather than a boolean nobody had to defend."""
     fits = templates.fitting(15, signalling=True)
     assert all(t.supports_signalling for t in fits)
-    assert "labelled_diagram" in {t.name for t in fits}
-    assert "key_phrase" not in {t.name for t in fits}
+    assert {"labelled_diagram", "key_phrase"} <= {t.name for t in fits}
+    assert all(t.supports_signalling for t in templates.TEMPLATES.values())
+
+
+def test_an_exemption_must_state_a_reason_a_reviewer_can_argue_with():
+    import dataclasses
+    original = templates.TEMPLATES["key_phrase"]
+    try:
+        templates.TEMPLATES["key_phrase"] = dataclasses.replace(
+            original, signalling_exemption="nope")
+        problems = templates.check_registry()
+        assert problems and "must say WHY" in problems[0]
+    finally:
+        templates.TEMPLATES["key_phrase"] = original
 
 
 def test_an_unknown_template_lists_the_known_ones():

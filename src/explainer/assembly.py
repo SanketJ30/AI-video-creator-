@@ -140,7 +140,8 @@ def default_transitions(n_scenes: int) -> list[Transition]:
 # -------------------------------------------------------------------- mux
 
 def mux_scene(video_hash: str, audio_hash: str, frames: int,
-              audio_samples_target: int) -> str:
+              audio_samples_target: int, pad_plan=None,
+              span_samples: list[int] | None = None) -> str:
     """One scene's picture + narration, padded to an exact frame count.
 
     Returns the content hash of the muxed chunk. Audio is padded with silence
@@ -156,7 +157,11 @@ def mux_scene(video_hash: str, audio_hash: str, frames: int,
                 # file. Without it, muxes made before the explicit -map was
                 # added would be served from cache and stay silent.
                 "stream_map": "0:v:0+1:a:0"},
-        extra={"frames": int(frames), "samples": int(audio_samples_target)})
+        extra={"frames": int(frames), "samples": int(audio_samples_target),
+               # In the closure: the same audio padded differently is a
+               # different scene, and serving one for the other would put the
+               # silence back where ISSUE-14 found it.
+               "pad_plan": pad_plan.to_json() if pad_plan else None})
     st = store()
     if st.exists(h):
         return h

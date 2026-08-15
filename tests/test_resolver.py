@@ -244,3 +244,69 @@ def test_the_per_span_fallback_is_carried_into_the_timeline():
     s = {"ref": "s05", "speech": FakeSpeech(SR, fallback=True),
          "timing_sensitivity": "elastic"}
     assert resolver.resolve([s]).scenes[0].per_span_fallback
+
+
+# ==================================== ISSUE-14: where the silence sits
+
+def test_padding_above_the_trailing_allowance_is_redistributed():
+    """MEASURED on v2 s04: 10.91s of padding, ALL trailing, in the 90s scene
+    carrying the whole explanation. §15.3's 15% budget is about absorbing
+    contraction distributed across a scene, not one block at the end."""
+    plan = resolver.distribute_padding(16, int(10.91 * SR), 90 * SR)
+    assert plan.trailing == int(90 * SR * 0.04)
+    assert len(plan.gaps) == 15
+    assert all(g > 0 for g in plan.gaps)
+
+
+def test_the_plan_preserves_every_sample():
+    """A lost sample is a frame-alignment failure downstream."""
+    total = int(10.91 * SR)
+    assert resolver.distribute_padding(16, total, 90 * SR).total == total
+
+
+def test_padding_inside_the_allowance_stays_trailing():
+    """Below the threshold there is nothing to redistribute, and inserting
+    beats anyway would add pauses nobody asked for."""
+    plan = resolver.distribute_padding(8, SR, 100 * SR)
+    assert plan.trailing == SR and not any(plan.gaps)
+
+
+def test_a_single_span_scene_cannot_redistribute():
+    """No boundary to put a beat at. The plan says so rather than the finished
+    video saying it."""
+    plan = resolver.distribute_padding(1, 5 * SR, 20 * SR)
+    assert plan.gaps == [] and plan.trailing == 5 * SR
+
+
+def test_no_padding_means_no_plan():
+    assert resolver.distribute_padding(4, 0, 10 * SR).total == 0
+
+
+def test_the_threshold_is_marked_authored():
+    import inspect
+    src = inspect.getsource(resolver)
+    assert "AUTHORED AND UNREVIEWED" in src
+    assert resolver.AUTHORED_MAX_TRAILING_SILENCE_SHARE == 0.04
+
+
+def test_span_timings_shift_with_the_inserted_beats():
+    """A cue resolved against unshifted timings fires while the previous span
+    is still on screen, and the error grows with every gap."""
+    from explainer.align import SceneAlignment, SpanTiming
+    al = SceneAlignment(scene_ref="s01", audio_hash="a" * 64, sample_rate=SR,
+                        spans=[SpanTiming("sp_a", "a", 0, SR),
+                               SpanTiming("sp_b", "b", SR, 2 * SR),
+                               SpanTiming("sp_c", "c", 2 * SR, 3 * SR)])
+    resolver._apply_padding(al, resolver.PadPlan(gaps=[SR, SR], trailing=0))
+    assert [(s.start, s.end) for s in al.spans] == [
+        (0, SR), (2 * SR, 3 * SR), (4 * SR, 5 * SR)]
+
+
+def test_a_rigid_scene_ends_with_at_most_the_allowed_tail():
+    """The end-to-end property: no scene may finish on a long block of nothing."""
+    spans = [SpanTiming(f"sp_{i}", "x", i * SR, (i + 1) * SR) for i in range(8)]
+    sp = FakeSpeech(8 * SR, spans=spans)
+    timing, _ = resolver.resolve_scene("s04", sp, "rigid", 20, [])
+    allowed = timing.padded_samples * resolver.AUTHORED_MAX_TRAILING_SILENCE_SHARE
+    assert timing.pad_plan.trailing <= allowed + 1
+    assert sum(timing.pad_plan.gaps) > 0, "the rest must be spread, not dropped"

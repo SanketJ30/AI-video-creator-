@@ -723,7 +723,8 @@ def scene_findings(s: SceneView, has_preceding_vocab: bool) -> list[Finding]:
     because the two answer different questions: `video_outside_target_band` and
     `template_variety` are properties of a whole video and fire by construction
     on any single scene, so a caller checking one scene must not get them."""
-    return (check_renders_something(s) + check_multimedia(s)
+    return (check_renders_something(s) + check_signalling_exemption(s)
+            + check_multimedia(s)
             + check_caption_safe_area(s)
             + check_cue_count(s) + check_onscreen_text_share(s)
             + check_verbatim_onscreen(s) + check_object_count(s)
@@ -753,7 +754,7 @@ def lint(scenes: list[SceneView]) -> LintReport:
 
 # ------------------------------------------------------------ persistence
 
-LINT_RULES = ("scene_renders_nothing", "onscreen_text_share", "verbatim_narration_onscreen",
+LINT_RULES = ("scene_renders_nothing", "signalling_rule_suppressed", "onscreen_text_share", "verbatim_narration_onscreen",
               "onscreen_object_count", "onscreen_text_density",
               "onscreen_text_elements", "pretraining_missing",
               "interacting_elements", "signalling_count", "unknown_template",
@@ -834,3 +835,47 @@ def check_renders_something(s: SceneView) -> list[Finding]:
         threshold={"min_drawable_slots": 1},
         fix="fill an on-screen slot, attach the asset the template expects, or "
             "choose a template that can draw without one")]
+
+
+# --------------------------------- when a capability flag suppresses a rule
+#
+# ISSUE-13's failure shape, and it is worth naming on its own: a CAPABILITY FLAG
+# DISABLING A PEDAGOGICAL RULE, with nothing surfacing the override.
+#
+# `supports_signalling=False` switched off §9.2 — "never zero", stated without
+# exceptions — for five templates. On v2 that exempted 6 of 9 scenes. The cue
+# count was 9 and the linter was silent, so the report read as compliant while
+# two thirds of the video had no signalling at all. Nobody chose that; it fell
+# out of a boolean nobody had to justify.
+#
+# This is distinct from the form-vs-substance pattern behind ISSUE-8 and
+# ISSUE-12, where a check measured the wrong thing. Here the check was correct
+# and simply never ran, because a flag said it did not apply.
+
+def check_signalling_exemption(s: SceneView) -> list[Finding]:
+    """INFO whenever a template's exemption suppresses §9.2 for a scene.
+
+    Never blocking and never a warning: an exemption with a stated reason is a
+    legitimate decision. The point is that it cannot be a SILENT one — the rule
+    it turns off, and the reason, both reach the report.
+    """
+    if not s.template_name:
+        return []
+    try:
+        t = templates.get(s.template_name)
+    except KeyError:
+        return []
+    if t.supports_signalling:
+        return []
+    return [Finding(
+        rule="signalling_rule_suppressed", severity="info", subject=s.ref,
+        message=f"§9.2 requires 1-3 signalling events per scene and states "
+                f"'never zero' without exceptions. '{t.name}' is exempt: "
+                f"{t.signalling_exemption}",
+        measured={"template": t.name, "cues": len(s.cues),
+                  "exemption_reason": t.signalling_exemption},
+        threshold={"min_cues": MIN_CUES, "max_cues": MAX_CUES,
+                   "suppressed_rule": "signalling_count"},
+        fix="if the reason no longer holds, clear the exemption on the "
+            "template; §9.2 applies by default")
+    ]

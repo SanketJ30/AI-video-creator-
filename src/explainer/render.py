@@ -39,6 +39,7 @@ boundaries at concat time.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import shutil
 import subprocess
@@ -91,6 +92,32 @@ def renderer_version() -> str:
 
 
 @lru_cache(maxsize=1)
+def render_source_version() -> str:
+    """Content hash of the renderer's own source.
+
+    §11.3 puts "Chromium / FFmpeg / codec versions" in the cache key because a
+    libx264 bump changes bytes. The React that draws the frame is the same class
+    of input and was missing: `renderer_version()` is the Remotion PACKAGE
+    version, which does not move when Scene.tsx does.
+
+    MEASURED: rewriting `table_build` from a flat list to a real grid produced
+    different bytes under an identical closure hash, and `LocalStore.put` raised
+    StoreError — invariant 2 doing its job. Without this, every scene rendered
+    before a renderer change would be served stale from cache forever, and the
+    only symptom would be a video that quietly did not match its own templates.
+    """
+    files = sorted(list((RENDER_DIR / "src").rglob("*.tsx"))
+                   + list((RENDER_DIR / "src").rglob("*.ts"))
+                   + [RENDER_DIR / "remotion.config.ts"])
+    h = hashlib.sha256()
+    for f in files:
+        if f.is_file():
+            h.update(f.name.encode())
+            h.update(f.read_bytes())
+    return h.hexdigest()[:16]
+
+
+@lru_cache(maxsize=1)
 def _npx() -> str:
     for name in ("npx.cmd", "npx"):
         found = shutil.which(name)
@@ -126,6 +153,9 @@ def closure(props: dict, frames: int) -> str:
         model_version=None,
         code_version=None,
         config={"renderer": renderer_version(),
+                # The renderer's SOURCE, not just its package version. See
+                # render_source_version().
+                "renderer_source": render_source_version(),
                 "ffmpeg": ffmpeg_version(),
                 "codec": INTERMEDIATE_CODEC,
                 "prores_profile": PRORES_PROFILE,

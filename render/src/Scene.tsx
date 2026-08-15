@@ -129,6 +129,26 @@ export const Scene: React.FC<SceneProps> = ({
   );
 };
 
+/**
+ * The visual a cue produces on a scalar text slot.
+ *
+ * Every template can host signalling now (§9.2: "never zero"), so every
+ * template has to be able to DRAW one. Previously only the list templates
+ * consulted `isCued`, and five templates carried a `supports_signalling=False`
+ * flag that switched §9.2 off rather than admitting the renderer had no way to
+ * show a cue on them. Flipping that flag without this would have produced cues
+ * the renderer silently dropped — the other half of the same bug.
+ */
+const cued = (on: boolean): React.CSSProperties =>
+  on
+    ? {
+        color: ACCENT,
+        // Kept subtle: a highlight directs attention, it does not redesign the
+        // frame mid-scene. §9.2's scale_pulse bounds live in signal_designer.
+        textDecorationColor: ACCENT,
+      }
+    : {};
+
 const Body: React.FC<{
   template: string;
   slots: Record<string, unknown>;
@@ -145,19 +165,50 @@ const Body: React.FC<{
   switch (template) {
     case "key_phrase":
       return (
-        <div style={{ fontSize: big, fontWeight: 700, lineHeight: 1.15 }}>
-          {asText(slots.phrase)}
+        <div>
+          <div
+            style={{
+              fontSize: big,
+              fontWeight: 700,
+              lineHeight: 1.15,
+              ...cued(isCued("phrase", 0)),
+            }}
+          >
+            {asText(slots.phrase)}
+          </div>
+          {asText(slots.emphasis) ? (
+            <div
+              style={{
+                fontSize: mid,
+                marginTop: 28,
+                color: MUTED,
+                ...cued(isCued("emphasis", 0)),
+              }}
+            >
+              {asText(slots.emphasis)}
+            </div>
+          ) : null}
         </div>
       );
 
     case "title_card":
       return (
         <div>
-          <div style={{ fontSize: big, fontWeight: 700, lineHeight: 1.15 }}>
+          <div
+            style={{
+              fontSize: big, fontWeight: 700, lineHeight: 1.15,
+              ...cued(isCued("title", 0)),
+            }}
+          >
             {asText(slots.title)}
           </div>
           {asText(slots.subtitle) ? (
-            <div style={{ fontSize: mid, color: MUTED, marginTop: 24 }}>
+            <div
+              style={{
+                fontSize: mid, color: MUTED, marginTop: 24,
+                ...cued(isCued("subtitle", 0)),
+              }}
+            >
               {asText(slots.subtitle)}
             </div>
           ) : null}
@@ -167,10 +218,12 @@ const Body: React.FC<{
     case "term_card":
       return (
         <div>
-          <div style={{ fontSize: big, fontWeight: 700 }}>
+          <div style={{ fontSize: big, fontWeight: 700,
+                        ...cued(isCued("term", 0)) }}>
             {asText(slots.term)}
           </div>
-          <div style={{ fontSize: mid, color: MUTED, marginTop: 24 }}>
+          <div style={{ fontSize: mid, color: MUTED, marginTop: 24,
+                        ...cued(isCued("characteristic", 0)) }}>
             {asText(slots.characteristic)}
           </div>
         </div>
@@ -183,14 +236,16 @@ const Body: React.FC<{
       // is a required slot precisely so this template always has something to
       // draw while there is no asset pipeline.
       return (
-        <div style={{ fontSize: big, fontWeight: 700, lineHeight: 1.15 }}>
+        <div style={{ fontSize: big, fontWeight: 700, lineHeight: 1.15,
+                      ...cued(isCued("headline", 0)) }}>
           {asText(slots.headline)}
         </div>
       );
 
     case "concept_illustration":
       return (
-        <div style={{ fontSize: mid, color: MUTED }}>
+        <div style={{ fontSize: mid, color: MUTED,
+                      ...cued(isCued("caption", 0)) }}>
           {asText(slots.caption)}
         </div>
       );
@@ -409,7 +464,10 @@ const Body: React.FC<{
           ) : null}
           {series.map((s, i) =>
             revealed(i, series.length, progress) ? (
-              <div key={i} style={{ padding: "10px 0" }}>{label(s)}</div>
+              <div key={i} style={{ padding: "10px 0",
+                                    ...cued(isCued("series", i)) }}>
+                {label(s)}
+              </div>
             ) : null,
           )}
         </div>

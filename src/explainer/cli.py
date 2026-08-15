@@ -1254,8 +1254,12 @@ def render(slug: str, video_ref: str,
 
         r = render_mod.render_scene(e["ref"], e["template"], e["slots"], cues,
                                     timing.frames)
+        # Span lengths WITHOUT the inserted beats, so the mux can cut the
+        # audio at the same boundaries the resolver planned against.
+        span_lens = [sp["end"] - sp["start"] for sp in timing.spans]
         muxed = assembly.mux_scene(r.hash, timing.audio_hash, timing.frames,
-                                   timing.padded_samples)
+                                   timing.padded_samples, timing.pad_plan,
+                                   span_lens)
         chunks.append(muxed)
         typer.echo(f"  {e['ref']:6} {e['template']:22} {timing.frames:5} frames  "
                    f"{'cached' if r.cached else 'rendered'}  {r.hash[:12]}")

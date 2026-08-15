@@ -170,12 +170,12 @@ def test_more_than_three_cues_is_rejected():
     assert problems and "maximum of 3" in problems[0]
 
 
-def test_a_non_signalling_template_may_carry_zero(caplog):
-    """The ISSUE-5 exemption. Recorded there as an authored judgement that
-    conflicts with §9.2's literal 'never zero'."""
+def test_every_template_must_now_carry_a_cue():
+    """ISSUE-13: the exemption is gone. §9.2's 'never zero' applies to
+    key_phrase exactly as it applies to labelled_diagram."""
     from explainer import templates
-    assert not sd.check_count("s01", 0, templates.get("key_phrase"))
-    assert sd.check_count("s01", 1, templates.get("key_phrase"))
+    assert sd.check_count("s01", 0, templates.get("key_phrase"))
+    assert not sd.check_count("s01", 1, templates.get("key_phrase"))
 
 
 def test_scale_pulse_carries_its_spec_bounds_without_being_asked():

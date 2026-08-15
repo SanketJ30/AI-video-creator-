@@ -628,7 +628,7 @@ that measures form passing something wrong in substance.
 
 ---
 
-## ISSUE-13 — §9.2 signalling is absent from two thirds of the video, and the signal designer is not at fault · OPEN
+## ISSUE-13 — §9.2 signalling is absent from two thirds of the video, and the signal designer is not at fault · FIXED
 
 **Question asked: did the signal designer produce cues the renderer then dropped,
 or never produce them? Answer: never produced, and the renderer dropped
@@ -675,7 +675,7 @@ visible rather than silent, and it needs a threshold v0.2 does not give.
 
 ---
 
-## ISSUE-14 — 11 seconds of dead air at the end of the video's central scene · OPEN
+## ISSUE-14 — 11 seconds of dead air at the end of the video's central scene · FIXED
 
 s04 is the 90 s `present` scene carrying the whole explanation. Its narration is
 79.09 s. The remaining **10.91 s is silence**.
@@ -771,3 +771,82 @@ way `cold_open` now has `headline`.
 **Also worth stating plainly: the whole corpus is sparse.** The best scene in the
 video reaches 3.31% ink. Nothing here is dense enough to look designed, and the
 ink profile is the first number that says so.
+
+
+---
+
+## ISSUE-13 / ISSUE-14 — resolutions
+
+### ISSUE-13, and the failure shape it names
+
+**A capability flag disabling a pedagogical rule, with nothing surfacing the
+override.** This is distinct from the form-vs-substance pattern behind ISSUE-8
+and ISSUE-12, where a check measured the wrong thing. Here the check was correct
+and simply never ran, because a boolean said it did not apply. Nobody decided
+that two thirds of v2 would have no signalling; it fell out of a flag nobody had
+to justify.
+
+**The default is inverted.** `supports_signalling: bool` is replaced by
+`signalling_exemption: str`. Empty means §9.2 applies — the default. A non-empty
+string is the stated reason it cannot, `check_registry` rejects a reason shorter
+than six words, and `linter.check_signalling_exemption` emits an INFO finding on
+every scene an exemption suppresses a rule for, naming both the rule and the
+reason.
+
+### Which templates genuinely cannot signal: NONE
+
+Audited all eleven. Every one of the five previously-exempt templates has at
+least one addressable slot a cue could target:
+
+| template | was exempt | addressable slots | genuinely cannot signal? |
+|---|---|---|---|
+| cold_open | yes | `headline`, `asset` | **no — unimplemented** |
+| title_card | yes | `title`, `subtitle` | **no — unimplemented** |
+| key_phrase | yes | `phrase`, `emphasis` | **no — unimplemented** |
+| term_card | yes | `term`, `characteristic`, `icon` | **no — unimplemented** |
+| concept_illustration | yes | `caption`, `asset` | **no — unimplemented** |
+
+**All five were unimplemented, not incapable.** The flag was standing in for a
+renderer that only consulted `isCued` on `rows`, `steps`, `tracks` and `nodes` —
+so a cue on a text slot would have been produced and silently dropped. Flipping
+the flag alone would have created exactly the "produced then dropped" bug that
+the ISSUE-13 diagnosis ruled out. `Scene.tsx` now renders cues on scalar text
+slots too.
+
+**Measured on v2 after:** 9 cues across 3 scenes → **24 cues across 9 scenes,
+zero scenes without one.**
+
+### ISSUE-14
+
+`AUTHORED_MAX_TRAILING_SILENCE_SHARE = 0.04`, **AUTHORED AND UNREVIEWED**, in
+`resolver.py` with the reasoning beside it. Everything above that allowance is
+redistributed evenly across span boundaries, and `_apply_padding` shifts span
+and word timings so cues and captions move with the words — without that shift
+the last cue in a 16-span scene would fire seven seconds early.
+
+**Measured on s04:**
+
+| | before | after |
+|---|---:|---:|
+| scene duration | 90.00 s | 90.00 s |
+| narration | 79.09 s | 79.09 s |
+| **trailing silence** | **10.91 s (12.1%)** | **3.60 s (4.0%)** |
+| inter-span beats | none | 15 × 0.488 s |
+
+The beats land on sentence boundaries because that is where the spans are. This
+is a crude precursor to §9.3's settling beat (≥1.5 s held after each new
+concept), not an implementation of it — that rule is still in `DEFERRED_RULES`
+and would place beats by concept rather than spreading them evenly.
+
+### A closure bug this work exposed
+
+Rewriting the templates produced **different render bytes under an identical
+closure hash**, and `LocalStore.put` raised `StoreError` — invariant 2 doing its
+job. The closure carried `renderer_version()` (the Remotion *package* version)
+and `template_version`, neither of which moves when `Scene.tsx` does.
+
+Fixed at the closure, never at the blob: `render.render_source_version()` hashes
+the renderer's own source into the key, and the eight templates whose rendering
+semantics changed are bumped to 1.1.0. Without this, every scene rendered before
+a renderer change would be served stale forever, and the only symptom would be a
+video that quietly did not match its own templates.
