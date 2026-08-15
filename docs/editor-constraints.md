@@ -67,3 +67,35 @@ worse without paying for a full challenge. If such a button exists it must:
 The correct edit affordance for a factual error is **editing the constraint**
 (`brief.factual_constraints`) or **editing the sentence**, then regenerating —
 in that order.
+
+---
+
+## E3 — the editor must be able to act on a single span
+
+**Measured, ISSUE-19.** The Fact Challenger pinpoints defects to a span. The
+script writer can only regenerate a whole video. So the smallest response to a
+two-span problem is a 25-span re-roll — and invariant 8 says that re-roll is not
+a fix, it is a dice throw that has already been observed to make a narration
+worse.
+
+**The precision of the diagnosis currently has nowhere to go.** Every finding
+below the severity of "regenerate everything" is unactionable, which caps the
+value of the challenger regardless of how good its verdicts are.
+
+**What the editor needs, in order of how much it unlocks:**
+
+1. **Regenerate one scene**, holding every other scene byte-identical. The scene
+   is already the unit of the Gagné form, of the render, and of the cache; it is
+   the obvious first grain.
+2. **Regenerate one span in place**, given the surrounding narration as fixed
+   context. This is what a challenger finding actually calls for. It needs the
+   span's id to survive the rewrite, or every cue anchored to it breaks (R3) —
+   which is a different operation from `Narration.author`, and neither
+   constructor does it today.
+3. **Accept a human edit as a first-class input**, distinguished in provenance
+   from a generated one, so a hand-fixed span is visible as hand-fixed rather
+   than laundered into looking machine-produced.
+
+**Constraint on all three:** whatever regenerates must re-run the gates that
+passed before. A scene regenerated in isolation has not been challenged, has not
+been linted, and its `new_terms` have not been recomputed against the registry.

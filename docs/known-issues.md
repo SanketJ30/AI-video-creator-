@@ -1008,3 +1008,44 @@ closed because:
 
 The original spans stay in the issue above as the specimen, and the fixture is
 guarded by a test so that "tidying" it cannot silently stop testing the checker.
+
+---
+
+## ISSUE-19 — two prose warnings that cannot be fixed without a re-roll · OPEN
+
+The Fact Challenger's two surviving warnings on the shipped v4 narration. Both
+are prose problems, not PostgreSQL semantics errors, and **neither is fixable by
+this pipeline today**.
+
+| span | verdicts ×3 | problem |
+|---|---|---|
+| s05 `sp_5086670411` | unsupported 0.55, unsupported 0.50, refuted 0.55 | *"exactly four ways to close the write-skew gap"* — the fourth is then said not to work, so the count is wrong by its own narration |
+| s07 `sp_14f10a8719` | unsupported ×3 (0.60) | `SELECT ... FOR UPDATE` recommended without stating that every participant must take the same lock, and that row locks cannot cover phantoms |
+
+### Why they are not fixed
+
+`script_writer.generate` operates on a **whole video**. There is no per-scene and
+no per-span regeneration path. So the options were:
+
+1. **Hand-edit the two spans** — produces a narration the pipeline did not
+   generate, which breaks the only property that makes any of this measurable:
+   that what ships is what the pipeline produces.
+2. **Add them as `factual_constraints` and regenerate the video** — the
+   structurally correct move for a *factual* error, but these are not factual
+   errors, and it re-rolls 25 spans to fix 2. **Invariant 8** applies: a
+   regeneration that comes back clean has told you nothing about the next one,
+   and this one measurably made things worse the last time it was tried on
+   flimsier grounds.
+3. **Leave them, logged.** Taken.
+
+### The real finding: there is no targeted edit affordance
+
+This is the gap the warnings expose. A challenger that pinpoints a defect **to a
+span** is paired with an author that can only rewrite **a video**, so the
+smallest available response to a two-span problem is a 25-span re-roll. The
+precision of the diagnosis has nowhere to go.
+
+That is Phase 4's job and it is now a requirement rather than a nice-to-have —
+recorded as **E3** in `docs/editor-constraints.md`. Until it exists, every
+challenger finding below "regenerate the whole video" is unactionable, which
+caps how useful the challenger can be no matter how good its verdicts are.
