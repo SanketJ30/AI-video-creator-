@@ -370,3 +370,71 @@ slot or an elastic s04, not a larger budget.
 6 distinct templates — `cold_open`, `title_card`, `labelled_diagram`,
 `state_timeline`, `table_build` ×2, `key_phrase` ×3. Longest identical run 1.
 21 cues across 9 scenes, none at zero.
+
+
+---
+
+## 9. FINAL — the video, with a complete 3-sample measured state
+
+**File:** `C:\Users\Sanket\projects\explainer-pipeline\var\render\mvcc-write-skew-v2.mp4`
+7.22 MB · **00:03:15.43** · 1920×1080 h264 30 fps · AAC mono 48 kHz,
+mean −17.2 dB. Measured runtime **195.43 s** against resolved **195.43 s** —
+zero drift. Budget 240 s, so **44.57 s under**.
+
+### Factual state — 3 samples, complete this time
+
+| | result |
+|---|---|
+| claims per sample | 24 / 24 / 22 |
+| **blocking** | **0 / 0 / 0** |
+| refuted | 2 / 1 / 2 — **max confidence 0.58**, all sub-threshold |
+| spans surviving all 3 samples | **18 / 25** |
+
+**Two spans carry a refutation in a majority of samples**, both already logged as
+ISSUE-19 and both prose rather than PostgreSQL semantics:
+
+| span | verdicts | problem |
+|---|---|---|
+| s05 `sp_5086670411` | refuted 0.55 / 0.55 / 0.50 | *"exactly four ways"* when the fourth is then said not to work |
+| s07 `sp_9d87ea06b9` | refuted 0.58 / unsupported 0.55 / refuted 0.58 | *"a table lock"* silently equated with `ACCESS EXCLUSIVE` |
+
+The remaining five are `unsupported` in some samples and `survives` in others —
+missing preconditions, not falsehoods, and the disagreement across samples is
+itself the reason three samples are run.
+
+**No refutation anywhere reached the 0.70 threshold.** The video has **no
+blocking factual error**.
+
+### §15.3 fix: s04 made elastic, not the budget raised
+
+The choice was between making s04 elastic and shortening the `present` slot; the
+budget was not touched. **Elastic**, and for a structural reason rather than a
+per-scene one.
+
+MEASURED: every animation in `Scene.tsx` is a pure function of
+`progress = frame / (durationInFrames - 1)`. **No template in the registry has a
+tempo of its own** — every one stretches to whatever duration it is given. §15.3's
+`rigid` exists for a visual whose animation lands on beats the audio cannot move,
+and nothing here has beats.
+
+So `intrinsic_tempo` is now a declared **template** property, and
+`effective_timing_sensitivity` downgrades a rigid request on a template that does
+not claim one — reporting the downgrade, never silently, because it changes the
+scene's duration. Same inversion as `signalling_exemption`: a property that
+disables a rule has to be declared and justified by the thing that owns it,
+rather than guessed per scene by a model that sees narration and not motion.
+
+| | before | after |
+|---|---:|---:|
+| s04 | 90.00 s, **15.49 s silence (17%)** | **74.53 s, 0.02 s silence** |
+| s07 | 19.00 s, 2.42 s silence | 16.60 s, 0.02 s silence |
+| video | 213.30 s | **195.43 s** |
+| §15.3 fit problems | 1 | **0** |
+
+The video got 17.9 s shorter by removing silence, not content.
+
+### Cache behaviour, incidentally confirmed
+
+Two scenes (`s08`, `s09`) were **cache hits** on this render: their narration,
+slots, cues and frame counts were unchanged by the timing fix, so their closures
+were unchanged. §11.4's position-independence holding on a real edit.

@@ -19,6 +19,7 @@ import typer
 from . import brief as brief_mod
 from . import (coursegraph, db, gagne, goldgraph, linter, prose,
                orchestrator, speech, termregistry, worker)
+from . import templates as templates_mod
 from . import manifest as manifest_mod
 from .agents import objective_extractor
 from .config import settings
@@ -1342,26 +1343,32 @@ def _video_timeline(conn, slug: str, video_ref: str):
     rows = sw.load(conn, str(video["id"]))
     if not rows:
         raise LookupError(f"no script for '{video_ref}'")
-    entries = []
+    entries, downgrades = [], []
     for r in rows:
         nar = Narration.from_stored(r["narration"])
         sp = speech.speak(r["ref"], nar)
         spec = r["visual_spec"] or {}
+        # §15.3: rigid is a TEMPLATE property, not a per-scene guess. The
+        # downgrade is reported, never silent — it changes the duration.
+        sensitivity, why = templates_mod.effective_timing_sensitivity(
+            spec.get("template") or "", r["timing_sensitivity"])
+        if why:
+            downgrades.append((r["ref"], r["timing_sensitivity"], sensitivity, why))
         entries.append({"ref": r["ref"], "speech": sp,
-                        "timing_sensitivity": r["timing_sensitivity"],
+                        "timing_sensitivity": sensitivity,
                         "target_seconds": (r["pedagogy_meta"] or {}).get(
                             "duration_target_seconds"),
                         "cues": spec.get("cues") or [],
                         "template": spec.get("template") or "",
                         "slots": spec.get("slots") or {}})
-    return video, rows, entries, resolver.resolve(entries)
+    return video, rows, entries, resolver.resolve(entries), downgrades
 
 
 @video_app.command("info")
 def video_info(slug: str, video_ref: str) -> None:
     """Resolved timing for one video, without rendering anything."""
     with db.tx() as conn:
-        video, rows, entries, tl = _video_timeline(conn, slug, video_ref)
+        video, rows, entries, tl, downgrades = _video_timeline(conn, slug, video_ref)
     starts = tl.starts()
     typer.echo(f"{video['ref']}  {video['title']}")
     typer.echo(f"budget {video['target_seconds']}s   "
@@ -1378,6 +1385,13 @@ def video_info(slug: str, video_ref: str) -> None:
     typer.echo("")
     typer.echo(f"TOTAL {tl.total_frames} frames = {tl.total.seconds:.3f}s "
                f"({tl.total.seconds - video['target_seconds']:+.2f}s vs budget)")
+    if downgrades:
+        typer.echo("")
+        typer.echo(err("TIMING DOWNGRADES (§15.3)", fg=typer.colors.BRIGHT_BLACK,
+                       bold=True))
+        for ref, was, now, why in downgrades:
+            typer.echo(err(f"  {ref}: {was} -> {now}; {why}",
+                           fg=typer.colors.BRIGHT_BLACK))
     if tl.problems:
         typer.echo("")
         typer.echo(err("FIT PROBLEMS (§15.3)", fg=typer.colors.YELLOW, bold=True))
@@ -1397,7 +1411,7 @@ def render(slug: str, video_ref: str,
     from . import assembly
     from . import render as render_mod
     with db.tx() as conn:
-        video, rows, entries, tl = _video_timeline(conn, slug, video_ref)
+        video, rows, entries, tl, downgrades = _video_timeline(conn, slug, video_ref)
 
     wanted = [e for e in entries if scene is None or e["ref"] == scene]
     if not wanted:

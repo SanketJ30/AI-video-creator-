@@ -298,3 +298,50 @@ def test_preconditions_do_not_block_a_render():
     t = templates.get("key_phrase")
     assert not templates.validate_params(t, {"phrase": "Spot it.",
                                              "emphasis": "Spot"})
+
+
+# ------------------------------------ §15.3: rigid is a template property
+
+def test_no_template_currently_claims_an_intrinsic_tempo():
+    """MEASURED: every animation in Scene.tsx is a pure function of
+    `progress = frame / (durationInFrames - 1)`, so every template stretches to
+    whatever duration it is given. If this fails, a template gained real beats
+    and its `rigid` is now earned — check Scene.tsx before changing the test."""
+    assert not [t.name for t in templates.TEMPLATES.values() if t.intrinsic_tempo]
+
+
+def test_rigid_is_downgraded_on_a_template_with_no_tempo():
+    """s04 held 15.49s of silence — 17% against §15.3's 15% — to protect a tempo
+    that does not exist."""
+    got, why = templates.effective_timing_sensitivity("state_timeline", "rigid")
+    assert got == "elastic"
+    assert "no intrinsic tempo" in why
+
+
+def test_the_downgrade_is_never_silent():
+    """It changes the scene's duration, so a human must see why."""
+    _, why = templates.effective_timing_sensitivity("table_build", "rigid")
+    assert why and "§15.3" in why
+
+
+def test_elastic_passes_through_untouched():
+    assert templates.effective_timing_sensitivity("key_phrase", "elastic") == (
+        "elastic", "")
+
+
+def test_rigid_survives_on_a_template_that_earns_it():
+    """The mechanism must actually permit rigid, or it is just a ban."""
+    import dataclasses
+    original = templates.TEMPLATES["state_timeline"]
+    try:
+        templates.TEMPLATES["state_timeline"] = dataclasses.replace(
+            original, intrinsic_tempo=True)
+        assert templates.effective_timing_sensitivity(
+            "state_timeline", "rigid") == ("rigid", "")
+    finally:
+        templates.TEMPLATES["state_timeline"] = original
+
+
+def test_an_unknown_template_cannot_claim_a_tempo():
+    got, why = templates.effective_timing_sensitivity("no_such", "rigid")
+    assert got == "elastic" and "unknown" in why

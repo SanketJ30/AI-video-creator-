@@ -161,6 +161,25 @@ class Template:
     # note attached to the thing it constrains, so it travels with the template
     # instead of living in a findings doc nobody opens while editing it.
     preconditions: tuple[str, ...] = ()
+    # Does this template's motion have a tempo of its own?
+    #
+    # §15.3's `rigid` exists for a visual that must hold its authored duration
+    # because its animation lands on beats the audio cannot move. That is a
+    # property of the TEMPLATE, not a judgement the script writer should make
+    # per scene — the writer sees narration, not motion.
+    #
+    # MEASURED: every animation in Scene.tsx is a pure function of
+    # `progress = frame / (durationInFrames - 1)`, so every template stretches
+    # to whatever duration it is given. NO template in this registry has an
+    # intrinsic tempo, and none sets this True. Two v2 scenes were nonetheless
+    # marked `rigid` by the model, and s04 consequently held 15.49 s of silence
+    # — 17% of its duration against §15.3's 15% budget — to protect a tempo that
+    # does not exist.
+    #
+    # When a template with real beats arrives (a synced walkthrough, a
+    # music-locked build), it sets this and earns `rigid`. Until then, asking
+    # for rigid is asking for silence.
+    intrinsic_tempo: bool = False
 
     def param(self, name: str) -> Param:
         for p in self.params:
@@ -444,6 +463,32 @@ def validate_params(template: Template, params: dict) -> list[str]:
             problems.append(f"{template.name}: '{p.name}' must be a string")
 
     return problems
+
+
+def effective_timing_sensitivity(template_name: str,
+                                 requested: str) -> tuple[str, str]:
+    """What §15.3 sensitivity a scene actually gets, and why.
+
+    Returns `(sensitivity, reason)`. `reason` is empty when the request stands.
+
+    A scene may only be `rigid` if its template declares `intrinsic_tempo`.
+    Otherwise the request is downgraded to `elastic` — not silently: the reason
+    travels to the CLI and the findings, because a downgrade changes the scene's
+    duration and a human should see why.
+    """
+    if requested != "rigid":
+        return requested or "elastic", ""
+    try:
+        t = get(template_name)
+    except KeyError:
+        return "elastic", (f"template {template_name!r} is unknown, so no "
+                           f"intrinsic tempo can be claimed for it")
+    if t.intrinsic_tempo:
+        return "rigid", ""
+    return "elastic", (
+        f"'{t.name}' has no intrinsic tempo — its motion is proportional to the "
+        f"duration it is given — so a rigid scene would hold silence to protect "
+        f"a tempo that does not exist (§15.3)")
 
 
 def _check_list_shape(template: "Template", p: Param, value: list,
