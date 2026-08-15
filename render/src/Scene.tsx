@@ -192,11 +192,16 @@ const Body: React.FC<{
   minFontPx: number;
   isCued: (slot: string, i: number, id?: string) => boolean;
 }> = ({ template, slots, progress, minFontPx, isCued }) => {
-  // §11.6 / §11.2: no size below minFontPx at 1080p. Aggressive encoding rings
-  // small text, and the a11y linter enforces the same floor upstream.
-  const big = Math.max(minFontPx * 3, 72);
-  const mid = Math.max(minFontPx * 2, 48);
-  const small = Math.max(minFontPx, 32);
+  // §6's type scale, by ROLE. Sizes were previously arithmetic (minFontPx x3,
+  // x2, x1), which produced three sizes with no hierarchy beyond magnitude and
+  // no way to say "this is a label" or "this is a caption". A role carries the
+  // weight and line-height with it.
+  //
+  // Nothing here shrinks to fit. §6: "Never solve a layout problem by shrinking
+  // type below 24 px" — when copy overflows, `linter.check_type_fits` blocks
+  // and tells the author to reduce copy, restructure or split the scene.
+  const t = typeScale;
+  const px = (r: { size: number }) => Math.max(r.size, minFontPx);
 
   switch (template) {
     case "key_phrase":
@@ -204,8 +209,8 @@ const Body: React.FC<{
         <div>
           <div
             style={{
-              fontSize: big,
-              fontWeight: 700,
+              fontSize: px(t.display),
+              fontWeight: t.h2.weight,
               lineHeight: 1.15,
               ...cued(isCued("phrase", 0)),
             }}
@@ -215,7 +220,7 @@ const Body: React.FC<{
           {asText(slots.emphasis) ? (
             <div
               style={{
-                fontSize: mid,
+                fontSize: px(t.h2),
                 marginTop: space.md,
                 color: color.inkMuted,
                 ...cued(isCued("emphasis", 0)),
@@ -232,7 +237,7 @@ const Body: React.FC<{
         <div>
           <div
             style={{
-              fontSize: big, fontWeight: 700, lineHeight: 1.15,
+              fontSize: px(t.display), fontWeight: t.display.weight, lineHeight: t.display.line,
               ...cued(isCued("title", 0)),
             }}
           >
@@ -241,7 +246,7 @@ const Body: React.FC<{
           {asText(slots.subtitle) ? (
             <div
               style={{
-                fontSize: mid, color: color.inkMuted, marginTop: space.md,
+                fontSize: px(t.body), fontWeight: t.body.weight, color: color.inkMuted, marginTop: space.md,
                 ...cued(isCued("subtitle", 0)),
               }}
             >
@@ -254,11 +259,11 @@ const Body: React.FC<{
     case "term_card":
       return (
         <div>
-          <div style={{ fontSize: big, fontWeight: 700,
+          <div style={{ fontSize: px(t.h1), fontWeight: t.h1.weight,
                         ...cued(isCued("term", 0)) }}>
             {asText(slots.term)}
           </div>
-          <div style={{ fontSize: mid, color: color.inkMuted, marginTop: space.md,
+          <div style={{ fontSize: px(t.body), fontWeight: t.body.weight, color: color.inkMuted, marginTop: space.md,
                         ...cued(isCued("characteristic", 0)) }}>
             {asText(slots.characteristic)}
           </div>
@@ -272,7 +277,7 @@ const Body: React.FC<{
       // is a required slot precisely so this template always has something to
       // draw while there is no asset pipeline.
       return (
-        <div style={{ fontSize: big, fontWeight: 700, lineHeight: 1.15,
+        <div style={{ fontSize: px(t.display), fontWeight: t.display.weight, lineHeight: t.display.line,
                       ...cued(isCued("headline", 0)) }}>
           {asText(slots.headline)}
         </div>
@@ -280,7 +285,7 @@ const Body: React.FC<{
 
     case "concept_illustration":
       return (
-        <div style={{ fontSize: mid, color: color.inkMuted,
+        <div style={{ fontSize: px(t.h2), color: color.inkMuted,
                       ...cued(isCued("caption", 0)) }}>
           {asText(slots.caption)}
         </div>
@@ -295,13 +300,13 @@ const Body: React.FC<{
       const rows = asList(slots.rows);
       const grid = `repeat(${Math.max(1, cols.length)}, 1fr)`;
       return (
-        <div style={{ fontSize: small, lineHeight: 1.45, width: "100%" }}>
+        <div style={{ fontSize: px(t.body), lineHeight: t.body.line, width: "100%" }}>
           <div
             style={{
               display: "grid",
               gridTemplateColumns: grid,
               gap: `0 ${canvas.gutter}px`,
-              fontWeight: 700,
+              fontWeight: t.h2.weight,
               paddingBottom: space.xs,
               borderBottom: `3px solid ${color.structure}`,
             }}
@@ -343,7 +348,7 @@ const Body: React.FC<{
         <div
           style={{
             fontFamily: font.mono,
-            fontSize: small,
+            fontSize: px(t.body),
             lineHeight: 1.6,
           }}
         >
@@ -378,7 +383,7 @@ const Body: React.FC<{
         return i < 0 ? 0 : i;
       };
       return (
-        <div style={{ fontSize: small, width: "100%" }}>
+        <div style={{ fontSize: px(t.body), width: "100%" }}>
           <div
             style={{
               display: "grid",
@@ -392,8 +397,8 @@ const Body: React.FC<{
               <div
                 key={i}
                 style={{
-                  fontSize: mid,
-                  fontWeight: 700,
+                  fontSize: px(t.label),
+                  fontWeight: t.label.weight,
                   color: isCued("tracks", i) ? color.signal : color.ink,
                 }}
               >
@@ -410,7 +415,7 @@ const Body: React.FC<{
                 border: `1px solid ${color.signalBorder}`,
                 borderRadius: 10,
                 color: color.inkMuted,
-                fontWeight: 700,
+                fontWeight: t.h2.weight,
               }}
             >
               {asText(slots.invariant)}
@@ -459,7 +464,7 @@ const Body: React.FC<{
       return (
         <div>
           {asText(slots.title) ? (
-            <div style={{ fontSize: mid, fontWeight: 700, marginBottom: 32 }}>
+            <div style={{ fontSize: px(t.h2), fontWeight: t.h2.weight, marginBottom: space.lg }}>
               {asText(slots.title)}
             </div>
           ) : null}
@@ -473,7 +478,7 @@ const Body: React.FC<{
                 <div
                   key={i}
                   style={{
-                    fontSize: mid,
+                    fontSize: px(t.h2),
                     padding: `${space.md}px ${space.lg}px`,
                     border: `4px solid ${isCued("nodes", i, id) ? color.signal : color.ink}`,
                     borderRadius: 10,
@@ -492,9 +497,9 @@ const Body: React.FC<{
     case "series_build": {
       const series = asList(slots.series);
       return (
-        <div style={{ fontSize: small }}>
+        <div style={{ fontSize: px(t.body) }}>
           {asText(slots.title) ? (
-            <div style={{ fontSize: mid, fontWeight: 700, marginBottom: 32 }}>
+            <div style={{ fontSize: px(t.h2), fontWeight: t.h2.weight, marginBottom: space.lg }}>
               {asText(slots.title)}
             </div>
           ) : null}
@@ -513,7 +518,7 @@ const Body: React.FC<{
     case "ui_walkthrough": {
       const steps = asList(slots.steps);
       return (
-        <div style={{ fontSize: small, lineHeight: 1.6 }}>
+        <div style={{ fontSize: px(t.mono), lineHeight: t.mono.line }}>
           {steps.map((s, i) =>
             revealed(i, steps.length, progress) ? (
               <div key={i} style={{ padding: "8px 0" }}>
@@ -529,7 +534,7 @@ const Body: React.FC<{
       // An unknown template must be loud, not blank: a silently empty scene is
       // one nobody notices until the whole video is assembled.
       return (
-        <div style={{ fontSize: mid, color: color.signal, fontWeight: 700 }}>
+        <div style={{ fontSize: px(t.h2), color: color.signal, fontWeight: t.h2.weight }}>
           UNKNOWN TEMPLATE: {template}
         </div>
       );

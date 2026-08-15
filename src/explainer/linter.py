@@ -42,7 +42,7 @@ import json
 import re
 from dataclasses import dataclass, field
 
-from . import db, templates
+from . import db, design, templates
 from .prose import Finding, sentences, words
 
 # ===========================================================================
@@ -723,7 +723,8 @@ def scene_findings(s: SceneView, has_preceding_vocab: bool) -> list[Finding]:
     because the two answer different questions: `video_outside_target_band` and
     `template_variety` are properties of a whole video and fire by construction
     on any single scene, so a caller checking one scene must not get them."""
-    return (check_renders_something(s) + check_signalling_exemption(s)
+    return (check_renders_something(s) + check_type_fits(s)
+            + check_signalling_exemption(s)
             + check_multimedia(s)
             + check_caption_safe_area(s)
             + check_cue_count(s) + check_onscreen_text_share(s)
@@ -754,7 +755,8 @@ def lint(scenes: list[SceneView]) -> LintReport:
 
 # ------------------------------------------------------------ persistence
 
-LINT_RULES = ("scene_renders_nothing", "signalling_rule_suppressed", "onscreen_text_share", "verbatim_narration_onscreen",
+LINT_RULES = ("scene_renders_nothing", "signalling_rule_suppressed",
+              "type_does_not_fit", "onscreen_text_share", "verbatim_narration_onscreen",
               "onscreen_object_count", "onscreen_text_density",
               "onscreen_text_elements", "pretraining_missing",
               "interacting_elements", "signalling_count", "unknown_template",
@@ -879,3 +881,45 @@ def check_signalling_exemption(s: SceneView) -> list[Finding]:
         fix="if the reason no longer holds, clear the exemption on the "
             "template; §9.2 applies by default")
     ]
+
+
+# ----------------------------------------- §6: never shrink type to fit
+#
+# The design system's rule, made enforceable:
+#
+#   "Never solve a layout problem by shrinking type below 24 px. If content
+#    does not fit: reduce copy, restructure, split into another scene, change
+#    layout. Do not cram."
+#
+# A renderer that auto-shrinks satisfies the layout and breaks §11.6 (aggressive
+# encoding rings small text) and §16.2's legibility floor at the same time —
+# quietly, because the frame still looks composed. So the renderer does NOT
+# auto-shrink, and this gate turns the consequence into a blocking finding
+# addressed to the author, naming the four remedies §6 gives.
+
+def check_type_fits(s: SceneView) -> list[Finding]:
+    """BLOCKING when a scene's copy cannot be typeset inside the content region
+    at its specified sizes."""
+    if not s.template_name:
+        return []
+    try:
+        est = design.estimate_fit(s.template_name, s.slots)
+    except (KeyError, design.TokenError):
+        return []
+    if est.overflow_share <= design.AUTHORED_FIT_TOLERANCE:
+        return []
+
+    return [Finding(
+        rule="type_does_not_fit", severity="blocking", subject=s.ref,
+        message=f"copy needs about {est.needed_px}px of the "
+                f"{est.available_px}px content region "
+                f"({est.overflow_share:.0%} over) at the sizes §6 specifies. "
+                f"Type is NOT shrunk to compensate: §6's floor is 24px and "
+                f"§11.6 says aggressive encoding rings small text",
+        measured={"needed_px": est.needed_px, "available_px": est.available_px,
+                  "overflow_px": est.overflow_px, "lines": est.lines,
+                  "breakdown": est.detail, "estimate": True},
+        threshold={"tolerance": design.AUTHORED_FIT_TOLERANCE,
+                   "min_font_px": design.min_font_px()},
+        fix="§6 gives four remedies and shrinking is not among them: reduce "
+            "copy, restructure, split into another scene, or change layout")]

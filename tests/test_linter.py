@@ -504,3 +504,51 @@ def test_a_scene_with_no_template_is_left_to_the_other_gate():
     s = L.SceneView(ref="s01", gagne_slot="present", narration_text=NARR,
                     visual_spec={})
     assert not L.check_renders_something(s)
+
+
+# ============================ §6: content that does not fit is BLOCKING
+
+def test_a_scene_whose_copy_overflows_is_blocking():
+    """The design system's §6: 'Never solve a layout problem by shrinking type
+    below 24 px. If content does not fit: reduce copy, restructure, split into
+    another scene, change layout. Do not cram.'
+
+    A renderer that auto-shrinks satisfies the layout and breaks §11.6 and
+    §16.2's legibility floor at once, quietly, because the frame still looks
+    composed."""
+    s = scene(template="key_phrase", slots={"phrase": "word " * 220})
+    found = L.check_type_fits(s)
+    assert found and found[0].severity == "blocking"
+    assert found[0].rule == "type_does_not_fit"
+
+
+def test_the_finding_names_the_remedies_rather_than_shrinking():
+    s = scene(template="key_phrase", slots={"phrase": "word " * 220})
+    fix = L.check_type_fits(s)[0].fix
+    for remedy in ("reduce copy", "restructure", "split", "change layout"):
+        assert remedy in fix
+    assert "shrink" in fix, "the finding must say shrinking is not an option"
+
+
+def test_a_scene_that_fits_does_not_fire():
+    s = scene(template="key_phrase", slots={"phrase": "Spot it. Fix it."})
+    assert not L.check_type_fits(s)
+
+
+def test_the_finding_declares_itself_an_estimate():
+    """It is a character-count model, not the renderer's line breaker. A
+    consumer that reads it as exact will chase two-pixel overflows."""
+    s = scene(template="key_phrase", slots={"phrase": "word " * 220})
+    assert L.check_type_fits(s)[0].measured["estimate"] is True
+
+
+def test_a_marginal_overflow_does_not_block():
+    """Blocking a scene that actually fits is worse than missing one that
+    marginally does not — the author would have no way to satisfy the gate."""
+    assert L.design.AUTHORED_FIT_TOLERANCE > 0
+
+
+def test_the_gate_runs_in_the_scene_pass():
+    s = scene(template="key_phrase", slots={"phrase": "word " * 220})
+    assert "type_does_not_fit" in rules(
+        L.scene_findings(s, has_preceding_vocab=False))

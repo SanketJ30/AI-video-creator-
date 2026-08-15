@@ -278,3 +278,49 @@ def test_the_content_region_clears_the_caption_zone():
     assert usable > 0
     assert top + usable <= height - val("captionZone"), (
         "content region overlaps §16.2's caption exclusion zone")
+
+
+# ------------------------------------ §6: the renderer uses roles, not maths
+
+def test_the_renderer_sizes_type_by_role():
+    """Sizes were arithmetic (minFontPx x3/x2/x1): three magnitudes with no way
+    to say 'this is a label' or 'this is a caption'."""
+    src = strip_comments((RENDER_SRC / "Scene.tsx").read_text(encoding="utf-8"))
+    assert "minFontPx * 3" not in src and "minFontPx * 2" not in src
+    assert "typeScale" in src
+
+
+def test_the_renderer_never_shrinks_below_the_floor():
+    """§6's floor is absolute. `px()` clamps UP to minFontPx; nothing clamps
+    down."""
+    src = strip_comments((RENDER_SRC / "Scene.tsx").read_text(encoding="utf-8"))
+    assert "Math.max(r.size, minFontPx)" in src, (
+        "the size helper must clamp up to the floor, never down")
+    assert "Math.min(" not in src.split("const px =")[-1][:200]
+
+
+# --------------------------- the linter's model of the renderer, checked
+
+def test_every_registered_template_has_a_slot_role_mapping():
+    """`design.SLOT_ROLES` is a MODEL of Scene.tsx. A template missing from it
+    is a template the fit check silently skips."""
+    from explainer import design, templates
+    missing = set(templates.TEMPLATES) - set(design.SLOT_ROLES)
+    assert not missing, f"no type mapping for {sorted(missing)}"
+
+
+def test_every_mapped_role_exists_in_the_token_file():
+    from explainer import design
+    roles = set(design.type_scale())
+    for template, mapping in design.SLOT_ROLES.items():
+        for slot, role in mapping.items():
+            assert role in roles, f"{template}.{slot} -> unknown role {role!r}"
+
+
+def test_the_tokens_are_parsed_not_copied():
+    """One source of truth. If the parse ever silently returns defaults, the
+    fit check measures a layout the renderer is not producing."""
+    from explainer import design
+    assert design.type_scale()["display"].size == 80
+    assert design.canvas()["marginLeft"] == 96
+    assert design.min_font_px() == 24
