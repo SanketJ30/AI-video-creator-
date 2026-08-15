@@ -1250,3 +1250,63 @@ element is singled out, so nothing has to guess which element "is" the answer.
 
 Tested on rendered pixels: the four states produce four different scene hashes,
 and a `neutral` scene produces no state treatment at all.
+
+
+---
+
+## ISSUE-22 — the strobe defect survived one level below `emphasis()` · FIXED
+
+**Found by measuring the fix, not by review.** ISSUE-17's motion fix took
+frames-that-differ from 2.7% to 9.2%, but 64 of 105 change events were still
+under 100 ms — *more in absolute terms* than the 43 before. That number only
+means something once it is broken down.
+
+### Three populations, one defect
+
+| | what | evidence |
+|---|---|---|
+| A | H.264 dither | runs of 1–20 px out of 129,600, periodic with the GOP |
+| B | scene cuts | 103,717 px at s04/s05, 98,020 px at s07/s08 |
+| C | **the defect** | 6,510 px in ONE frame, mid-scene, in `concept_illustration` |
+
+A and B are measurement artifacts of profiling the *concatenated* video. §10.5's
+TRANSITION is a hard cut by default and lives in `assembly.Transition`; a cut is
+a one-frame change by definition, and counting it as failed motion is wrong.
+
+C is real: a single `cued` boolean drove five properties — card border, card
+surface, marker fill, marker numeral and label ink — and flipped all five
+together. **This is the same defect as the strobe, one level down.**
+`emphasis()` was made continuous and these were not.
+
+Every remaining boolean cue path is now a `mix()` over the continuous focus
+amount, including `state_timeline`'s `filled = stepFocus > 0.5` (a chip flipping
+at the midpoint of the rise) and the two ISSUE-20 templates, so one rule holds
+everywhere rather than only where the planner can currently reach.
+
+### The gate, and why the first version of it was worthless
+
+`test_a_scene_is_not_mostly_static` asks whether ANY motion exists — a scene
+passes it while popping. The new gate: inside one scene there are no cuts to
+except, so every visible change is one of §10's verbs and the shortest band is
+FOCUS at 250 ms. An event above the noise floor lasting under 5 frames is a
+switch.
+
+**The first version passed on known-broken code.** The cue fired at 2 s, mid
+BUILD, so the pop merged into the ongoing run with no zero-delta frame between
+them. The fixture now fires at 5.5 s, after the last BUILD settles at frame 151.
+Measured before asserting — a test that passes on the defect it was written for
+is worse than no test, because it certifies the bug.
+
+### A second cause, found by the new gate
+
+`state_timeline` still popped ~85 px at the END of every BUILD, at max delta
+21/255. Not a boolean: while an element fades Chromium composites it and
+antialiases text in grayscale, then drops the layer the instant opacity reaches
+exactly 1 and re-rasterises the glyphs with SUBPIXEL antialiasing — grey
+`(254,254,254)` becoming `(254,255,255)`. `willChange` on the two fading verbs
+keeps the layer for the scene's duration.
+
+`-webkit-font-smoothing: antialiased` was tried first and **rejected**: Chromium
+honours it only on macOS, so it fixed nothing on this host and would have made
+the same closure render different bytes on a different operating system. The OS
+is not in the closure (§11.3) — a determinism hazard dressed as a fix.
