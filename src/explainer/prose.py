@@ -40,6 +40,27 @@ PASSIVE_RATIO_MAX = 0.20
 # §9.3 Speaking rate. The low end is what a dense slot can be delivered at
 # without losing the listener; the high end is the fastest a narrative slot can
 # run before it stops sounding like teaching.
+#
+# DELIBERATE DIVERGENCE FROM THE PINNED VOICE — decided 15 Aug 2026, keep it.
+#
+# MEASURED in week 5: piper-tts@1.6.1 / en_US-lessac-medium delivers **192 wpm**
+# averaged over mvcc-write-skew v2, ranging 170-209 by scene. Every number below
+# is lower than that, and they stay where §9.3 put them.
+#
+# These are a PEDAGOGICAL target, not a measurement of whichever voice happens
+# to be pinned. If the constant tracked the voice, swapping voices would
+# silently move every readability and pacing verdict in the corpus: a script
+# that passed would begin failing because the narrator changed, which is exactly
+# backwards. What a learner can follow does not change when the TTS vendor does.
+#
+# The consequence is known and accepted: `speaking_rate` findings run roughly
+# 20% pessimistic against this voice, so a scene flagged "over budget" may still
+# fit comfortably. That is why ISSUE-9's pre-week-5 budget arithmetic was wrong
+# in both directions — it predicted an 8s overrun and v2 came in 21s under.
+#
+# The fix is a SECOND, per-voice measured rate used for BUDGETING, leaving these
+# three as the comprehension gate. Not a change to these numbers. See W2 in
+# docs/week5-decisions-needed.md.
 WPM_DENSE_MIN, WPM_DENSE_MAX = 135, 160
 WPM_NARRATIVE_MAX = 185
 

@@ -61,6 +61,15 @@ it in would repeat exactly the mistake the harness work was done to stop.
 per-scene table; changing the constant is a decision with a pedagogical
 component and it is yours.
 
+> **RESOLVED 15 Aug 2026 — do not change the constant.** Confirmed reasoning:
+> §16.1's prosody gate wants a pedagogical target, and if the constant tracked
+> the voice then swapping voices would silently move every readability verdict —
+> a script that passed would start failing because the narrator changed. The
+> divergence is now recorded at the constant itself in `prose.py`, with the
+> measured 192 wpm and the consequence (findings run ~20% pessimistic against
+> this voice). Option 2 stands as the eventual shape: a second, per-voice
+> measured rate for budgeting only.
+
 ---
 
 ## W3 — Word timings are estimated, not measured

@@ -453,6 +453,23 @@ comfortably under.
 of what ISSUE-9 originally claimed, and the original claim is left above rather
 than edited so the correction is visible.
 
+**RESOLVED 15 Aug 2026 — the constant stays at 160 and the divergence is
+deliberate.** §16.1's prosody gate is a pedagogical target; if it tracked the
+pinned voice, swapping voices would silently move every readability verdict in
+the corpus, so a script that passed would begin failing because the narrator
+changed. `prose.py` now carries that reasoning at the constant.
+
+Two things follow, and both are worth stating plainly:
+
+1. `speaking_rate` findings run **~20% pessimistic** against this voice by
+   design. A scene flagged "over budget" may fit comfortably. That is the
+   accepted cost of a gate that does not move when the vendor does.
+2. **The budget arithmetic that produced the original ISSUE-9 prediction was
+   wrong at the source**, not just mis-transcribed here — it was a pre-week-5
+   estimate made against the 160 wpm figure without a measured voice to check
+   it. The eventual fix is a second per-voice measured rate used only for
+   budgeting (W2), leaving §9.3's three numbers as the comprehension gate.
+
 **Do not simply change 160 to 192.** Two reasons: 192 is one voice on one video
 (n=1), and §12's prosody gate wants a *target* rate for comprehension, which is
 a pedagogical number, not a measurement of whatever the current voice does. The

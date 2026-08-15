@@ -1183,7 +1183,7 @@ def _video_timeline(conn, slug: str, video_ref: str):
     return video, rows, entries, resolver.resolve(entries)
 
 
-@app.command("video-info")
+@video_app.command("info")
 def video_info(slug: str, video_ref: str) -> None:
     """Resolved timing for one video, without rendering anything."""
     with db.tx() as conn:
