@@ -553,7 +553,8 @@ const Body: React.FC<{
                   fontSize: px(t.label),
                   fontWeight: t.label.weight,
                   letterSpacing: 2,
-                  color: isCued("tracks", lane) ? color.signal : color.inkMuted,
+                  color: mix(color.inkMuted, color.signal,
+                             cueFocus("tracks", lane)),
                 }}
               >
                 {track.toUpperCase()}
@@ -575,17 +576,17 @@ const Body: React.FC<{
                 if (laneOf(st) !== lane) return null;
                 if (!shown(i, steps.length, "steps")) return null;
                 const stepFocus = cueFocus("steps", i);
-                const cued = stepFocus > 0.001;
-                // §9.4: "The active state is blue. A confirmed resolution can
-                // become green." The final step is the resolution.
-                // The last step is NOT assumed to be the resolution: that was
-                // the renderer inferring pedagogy from position. The scene's
-                // `resolutionState` says what state is being shown (ISSUE-21).
-                const marker =
-                  stepFocus > 0.001
-                    ? mix(color.structure, color.signal, stepFocus)
-                    : color.structure;
-                const filled = stepFocus > 0.5;
+                // §9.4: "The active state is blue." The last step is NOT
+                // assumed to be the resolution — that was the renderer
+                // inferring pedagogy from position, and `resolutionState` is
+                // the producer now (ISSUE-21).
+                const marker = mix(color.structure, color.signal, stepFocus);
+                // CONTINUOUS. `filled = stepFocus > 0.5` flipped the chip's
+                // fill and its numeral at the midpoint of §10.3's rise — 86 px
+                // switching in one frame, the same defect as the strobe one
+                // level down. The chip now fills as the focus arrives.
+                const chipFill = mix(color.surface, marker, stepFocus);
+                const chipInk = mix(color.inkMuted, color.surface, stepFocus);
                 return (
                   <div
                     key={i}
@@ -607,9 +608,9 @@ const Body: React.FC<{
                         width: 32,
                         height: 32,
                         borderRadius: 10,
-                        backgroundColor: filled ? marker : color.surface,
+                        backgroundColor: chipFill,
                         border: `2px solid ${marker}`,
-                        color: filled ? color.surface : color.inkMuted,
+                        color: chipInk,
                         fontSize: px(t.label),
                         fontWeight: t.label.weight,
                         textAlign: "center",
@@ -754,7 +755,12 @@ const Body: React.FC<{
 
           {flow.map((node, i) => {
             if (!shown(i, flow.length, "steps")) return null;
-            const cued = isCued("steps", i) || isCued("caption", i);
+            // CONTINUOUS. This single boolean drove FIVE properties — card
+            // border, card surface, marker fill, marker numeral and label ink —
+            // and flipped all of them together in one frame: 6510 sampled
+            // pixels, 5% of the frame, measured on the finished video. It was
+            // the strobe defect surviving one level below `emphasis()`.
+            const f = Math.max(cueFocus("steps", i), cueFocus("caption", i));
             const isLast = i === flow.length - 1;
             return (
               <div key={i}>
@@ -765,12 +771,8 @@ const Body: React.FC<{
                     gap: space.md,
                     padding: `${space.md}px`,
                     borderRadius: 10,
-                    border: `1px solid ${
-                      cued ? color.signalBorder : color.structure
-                    }`,
-                    backgroundColor: cued
-                      ? color.surfaceSignal
-                      : color.surface,
+                    border: `1px solid ${mix(color.structure, color.signalBorder, f)}`,
+                    backgroundColor: mix(color.surface, color.surfaceSignal, f),
                     ...buildStep(i, flow.length),
                   }}
                 >
@@ -779,10 +781,8 @@ const Body: React.FC<{
                       width: 32,
                       height: 32,
                       borderRadius: 8,
-                      backgroundColor: cued
-                        ? color.signal
-                        : color.surfaceSubtle,
-                      color: cued ? color.surface : color.inkMuted,
+                      backgroundColor: mix(color.surfaceSubtle, color.signal, f),
+                      color: mix(color.inkMuted, color.surface, f),
                       fontSize: px(t.label),
                       fontWeight: t.label.weight,
                       textAlign: "center",
@@ -795,7 +795,7 @@ const Body: React.FC<{
                     style={{
                       fontSize: px(t.h3),
                       fontWeight: t.h3.weight,
-                      color: cued ? color.signal : color.ink,
+                      ...emphasis(f),
                     }}
                   >
                     {node}
@@ -872,7 +872,7 @@ const Body: React.FC<{
             {nodes.map((n, i) => {
               if (!shown(i, nodes.length, "nodes")) return null;
               const id = asText((n as Record<string, unknown>)?.id);
-              const cued = isCued("nodes", i, id);
+              const f = cueFocus("nodes", i, id);
               return (
                 <div
                   key={i}
@@ -880,14 +880,10 @@ const Body: React.FC<{
                     fontSize: px(t.h3),
                     fontWeight: t.h3.weight,
                     padding: `${space.md}px ${space.lg}px`,
-                    border: `1px solid ${
-                      cued ? color.signalBorder : color.structure
-                    }`,
-                    backgroundColor: cued
-                      ? color.surfaceSignal
-                      : color.surface,
+                    border: `1px solid ${mix(color.structure, color.signalBorder, f)}`,
+                    backgroundColor: mix(color.surface, color.surfaceSignal, f),
                     borderRadius: 10,
-                    color: cued ? color.signal : color.ink,
+                    ...emphasis(f),
                     ...buildStep(i, nodes.length),
                   }}
                 >
@@ -955,7 +951,7 @@ const Body: React.FC<{
                   fontSize: px(t.mono),
                   lineHeight: t.mono.line,
                   // §17: highlight only the relevant line.
-                  color: isCued("steps", i) ? color.signal : color.ink,
+                  ...emphasis(cueFocus("steps", i)),
                 }}
               >
                 <span style={{ color: color.inkSubtle }}>$ </span>

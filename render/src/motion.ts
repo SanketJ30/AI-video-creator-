@@ -49,6 +49,27 @@ const easing = Easing.bezier(EASE[0], EASE[1], EASE[2], EASE[3]);
 /** Frames a duration in milliseconds occupies at this fps. */
 const frames = (ms: number, fps: number) => Math.max(1, (ms / 1000) * fps);
 
+/*
+ * WHY `willChange` IS ON BOTH FADING VERBS.
+ *
+ * MEASURED, not precautionary. While an element fades, Chromium gives it its
+ * own compositing layer and antialiases its text in grayscale; the instant
+ * opacity reaches exactly 1 the layer is dropped and the same glyphs re-render
+ * with SUBPIXEL antialiasing. On `state_timeline` that repainted ~1000 px in a
+ * single frame at the end of every BUILD — the pixels changed by at most 21/255
+ * so it is barely visible, but it is a one-frame change, and
+ * `test_no_visible_change_happens_in_a_single_frame` cannot tell a compositor
+ * artifact from an element being switched on. Nor should it have to.
+ *
+ * `willChange` keeps the layer for the scene's whole duration, so the text is
+ * rasterised one way throughout and the end of a fade changes nothing.
+ *
+ * `-webkit-font-smoothing: antialiased` was tried first and REJECTED: Chromium
+ * honours it only on macOS, so it fixed nothing on this host and — worse —
+ * would have made the same closure render different bytes on a different
+ * operating system. The OS is not in the closure (§11.3), so that is a
+ * determinism hazard dressed as a fix.
+ */
 /**
  * §10.1 REVEAL — "slight upward movement, opacity increase, no bounce, no
  * overshoot". For an element that simply enters.
@@ -67,6 +88,7 @@ export const reveal = (
   return {
     opacity: t,
     transform: `translateY(${(1 - t) * motion.reveal.shiftPx}px)`,
+    willChange: "opacity, transform",
   };
 };
 
@@ -94,6 +116,7 @@ export const build = (
   return {
     opacity: t,
     transform: `translateY(${(1 - t) * motion.build.shiftPx}px)`,
+    willChange: "opacity, transform",
   };
 };
 

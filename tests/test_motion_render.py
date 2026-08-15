@@ -161,6 +161,72 @@ def test_a_scene_is_not_mostly_static(tmp_path):
         f"intermediate frames is not a motion system.")
 
 
+def test_no_visible_change_happens_in_a_single_frame(tmp_path):
+    """The general form of the defect, as a gate rather than a spot check.
+
+    `test_a_scene_is_not_mostly_static` asks whether ANY motion exists, and a
+    scene can pass it while still popping: measured on the finished video, the
+    `cued` boolean in `concept_illustration` flipped a card's border, surface,
+    marker chip and label colour together in ONE frame — 5% of the frame at
+    once — inside a scene whose REVEAL was perfectly smooth. A max-run check
+    cannot see that.
+
+    Within a single scene there are no cuts to except: §10.5's TRANSITION
+    operates between scenes and lives in `assembly`. So every visible change
+    inside a scene is one of §10's verbs, and the shortest band is FOCUS at
+    250 ms — 7.5 frames. An event above the noise floor that lasts one or two
+    frames is therefore a switch, not a verb.
+    """
+    # The cue fires at 5.5 s, AFTER the last BUILD has settled (§10.2's band
+    # ends at frame 151 of 180). That separation is the whole fixture: with the
+    # cue at 2 s the pop merges into the ongoing build run, no zero-delta frame
+    # separates them, and this test passes on known-broken code. Measured on the
+    # defect: three clean 15-frame builds, then 6510 px in ONE frame.
+    cases = [
+        ("p_concept", "concept_illustration",
+         {"caption": "What Repeatable Read guarantees",
+          "steps": ["SNAPSHOT AT FIRST READ", "XMIN / XMAX PER ROW",
+                    "RULE SPANNING BOTH ROWS"]},
+         [{"kind": "highlight", "target": "steps[1]", "atSeconds": 5.5,
+           "params": {}}]),
+        ("p_timeline", "state_timeline",
+         {"tracks": ["Doctor A", "Doctor B"],
+          "invariant": "Someone must always stay on call",
+          "steps": [{"label": "reads count = 2", "track": "Doctor A"},
+                    {"label": "goes off-call", "track": "Doctor B"},
+                    {"label": "commits", "track": "Doctor A"}]},
+         [{"kind": "highlight", "target": "steps[2]", "atSeconds": 5.5,
+           "params": {}}]),
+    ]
+    # Sampled pixels below which a run is dither rather than an element. The
+    # finished H.264 MP4 has a real noise floor (runs of 1–20 px, periodic with
+    # the GOP); these are near-lossless ProRes intermediates and a probe found
+    # NO sub-threshold runs at all, so the floor sits low enough to catch a
+    # 32×32 marker chip (~70 px at this sample scale) rather than only a card.
+    NOISE = 50
+    MIN_FRAMES = 5     # 167ms — under §10.3's 250ms floor with margin for easing
+
+    bad: list[str] = []
+    for name, template, slots, cues in cases:
+        deltas = measure(tmp_path, name, template, slots, cues, 180)
+        run, peak, start = 0, 0, None
+        for i, d in enumerate(deltas + [0]):
+            if d > 0:
+                if start is None:
+                    start = i
+                run += 1
+                peak = max(peak, d)
+                continue
+            if run and peak >= NOISE and run < MIN_FRAMES:
+                bad.append(
+                    f"{template}: {peak} px changed over {run} frame(s) "
+                    f"({ms(run):.0f}ms) starting at frame {start}")
+            run, peak, start = 0, 0, None
+    assert not bad, (
+        "a visible change completed in under §10.3's shortest band — that is a "
+        "switch, not a motion verb:\n  " + "\n  ".join(bad))
+
+
 def test_transition_is_not_implemented_in_the_renderer():
     """§10.5 operates between scenes, and §11.4 already models that as a
     first-class node with its own cache key. There is nothing to measure here,
