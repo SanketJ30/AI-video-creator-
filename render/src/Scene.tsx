@@ -4,6 +4,9 @@ import {
   canvas, color, columns, contentHeight, contentLeft, contentTop, contentWidth,
   font, space, type as typeScale,
 } from "./tokens";
+import {
+  build, focusAmount, focusScale, reveal, resolveAmount, started,
+} from "./motion";
 
 /**
  * THE R8 BOUNDARY, and the design system's only implementation.
@@ -78,21 +81,6 @@ const cells = (row: unknown): string[] => {
   return Array.isArray(c) ? c.map((x) => asText(x)) : [];
 };
 
-/** §9.2 signalling, resolved: is this cue active at this frame? */
-const cueActive = (cue: Cue, seconds: number) =>
-  seconds >= cue.atSeconds && seconds < cue.atSeconds + 1.2;
-
-/**
- * §14 progressive disclosure: "one conceptual unit at a time".
- *
- * An item is revealed once the scene has progressed past its share, and stays
- * revealed — §9.5: "when a new row enters, old rows stay stable", and §9.4:
- * "previously introduced information should remain visible ... this preserves
- * the learner's mental map".
- */
-const revealed = (index: number, count: number, progress: number) =>
-  progress >= (index + 1) / (count + 1);
-
 /** §3: a cued text element takes the signal role — "look here". */
 const cuedText = (on: boolean): React.CSSProperties =>
   on ? { color: color.signal } : {};
@@ -109,16 +97,27 @@ export const Scene: React.FC<SceneProps> = ({
   const frame = useCurrentFrame();
   const { fps, durationInFrames, height } = useVideoConfig();
   const seconds = frame / fps;
-  const progress = durationInFrames > 1 ? frame / (durationInFrames - 1) : 1;
   const safeBottomPx = Math.round(height * captionSafeBottom);
 
-  const active = new Set(
-    cues.filter((c) => cueActive(c, seconds)).map((c) => c.target),
-  );
+  // §10.3 FOCUS. The cue's TIME came from the resolver, which computed it from
+  // the cue's span anchor (R3); this only shapes the moment around it. A
+  // target's focus is the strongest of the cues pointing at it.
+  const focusOf = (target: string): number =>
+    cues.reduce(
+      (best, c) =>
+        c.target === target
+          ? Math.max(best, focusAmount(seconds, c.atSeconds))
+          : best,
+      0,
+    );
+  const cueFocus = (slot: string, i: number, id?: string): number =>
+    Math.max(
+      focusOf(slot),
+      focusOf(`${slot}[${i}]`),
+      id ? focusOf(`${slot}.${id}`) : 0,
+    );
   const isCued = (slot: string, i: number, id?: string) =>
-    active.has(slot) ||
-    active.has(`${slot}[${i}]`) ||
-    (id ? active.has(`${slot}.${id}`) : false);
+    cueFocus(slot, i, id) > 0.01;
 
   return (
     <AbsoluteFill
@@ -146,9 +145,12 @@ export const Scene: React.FC<SceneProps> = ({
         <Body
           template={template}
           slots={slots}
-          progress={progress}
           minFontPx={minFontPx}
           isCued={isCued}
+          cueFocus={cueFocus}
+          frame={frame}
+          fps={fps}
+          durationInFrames={durationInFrames}
         />
       </div>
 
@@ -171,14 +173,33 @@ export const Scene: React.FC<SceneProps> = ({
 const Body: React.FC<{
   template: string;
   slots: Record<string, unknown>;
-  progress: number;
   minFontPx: number;
   isCued: (slot: string, i: number, id?: string) => boolean;
-}> = ({ template, slots, progress, minFontPx, isCued }) => {
+  cueFocus: (slot: string, i: number, id?: string) => number;
+  frame: number;
+  fps: number;
+  durationInFrames: number;
+}> = ({
+  template, slots, minFontPx, isCued, cueFocus, frame, fps,
+  durationInFrames,
+}) => {
   const t = typeScale;
   // §6's floor, clamping UP only. Nothing here shrinks to fit: when copy
   // overflows, `linter.check_type_fits` blocks and names §6's four remedies.
   const px = (r: { size: number }) => Math.max(r.size, minFontPx);
+
+  // §12's hierarchy, as three helpers so a component cannot accidentally
+  // animate a divider (level 1 gets nothing).
+  /** §12 level 2 — content entering. */
+  const enter = (order = 0) => reveal(frame, fps, order * 6);
+  /** §12 level 2 — content being constructed, one item at a time (§10.2). */
+  const buildStep = (i: number, n: number) =>
+    build(frame, fps, i, n, durationInFrames);
+  /** §14 — has item i been disclosed yet? */
+  const shown = (i: number, n: number) =>
+    started(frame, i, n, durationInFrames);
+  /** §12 level 4 — the scene's resolution. */
+  const resolved = resolveAmount(frame, fps, durationInFrames) > 0.5;
 
   switch (template) {
     // ================================================== §9.1 cold_open
@@ -421,15 +442,15 @@ const Body: React.FC<{
 
               {steps.map((st, i) => {
                 if (laneOf(st) !== lane) return null;
-                if (!revealed(i, steps.length, progress)) return null;
+                if (!shown(i, steps.length)) return null;
                 const cued = isCued("steps", i);
                 const isLast = i === steps.length - 1;
                 // §9.4: "The active state is blue. A confirmed resolution can
                 // become green." The final step is the resolution.
-                const resolved = isLast && progress > 0.95;
+                const isResolution = isLast && resolved;
                 const marker = cued
                   ? color.signal
-                  : resolved
+                  : isResolution
                     ? color.answer
                     : color.structure;
                 const onMarker = marker === color.structure;
@@ -524,9 +545,9 @@ const Body: React.FC<{
           </div>
 
           {rows.map((r, i) => {
-            if (!revealed(i, rows.length, progress)) return null;
+            if (!shown(i, rows.length)) return null;
             const rowCued = isCued("rows", i);
-            const isAnswer = i === highlight && progress > 0.9;
+            const isAnswer = i === highlight && resolved;
             return (
               <div
                 key={i}
@@ -603,7 +624,7 @@ const Body: React.FC<{
           ) : null}
 
           {flow.map((node, i) => {
-            if (!revealed(i, flow.length, progress)) return null;
+            if (!shown(i, flow.length)) return null;
             const cued = isCued("steps", i) || isCued("caption", i);
             const isLast = i === flow.length - 1;
             return (
@@ -719,7 +740,7 @@ const Body: React.FC<{
           ) : null}
           <div style={{ display: "flex", gap: space.md, flexWrap: "wrap" }}>
             {nodes.map((n, i) => {
-              if (!revealed(i, nodes.length, progress)) return null;
+              if (!shown(i, nodes.length)) return null;
               const id = asText((n as Record<string, unknown>)?.id);
               const cued = isCued("nodes", i, id);
               return (
@@ -764,7 +785,7 @@ const Body: React.FC<{
             </div>
           ) : null}
           {series.map((s, i) =>
-            revealed(i, series.length, progress) ? (
+            shown(i, series.length) ? (
               <div
                 key={i}
                 style={{
@@ -795,7 +816,7 @@ const Body: React.FC<{
           }}
         >
           {steps.map((s, i) =>
-            revealed(i, steps.length, progress) ? (
+            shown(i, steps.length) ? (
               <div
                 key={i}
                 style={{
@@ -820,7 +841,7 @@ const Body: React.FC<{
       return (
         <div style={{ width: columns(9) }}>
           {steps.map((s, i) =>
-            revealed(i, steps.length, progress) ? (
+            shown(i, steps.length) ? (
               <div
                 key={i}
                 style={{

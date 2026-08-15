@@ -324,3 +324,56 @@ def test_the_tokens_are_parsed_not_copied():
     assert design.type_scale()["display"].size == 80
     assert design.canvas()["marginLeft"] == 96
     assert design.min_font_px() == 24
+
+
+# ------------------------------------------- §10-§12: the motion grammar
+
+def test_the_motion_module_uses_only_the_five_verbs():
+    """§10 opens by rejecting "dozens of unrelated animation presets"."""
+    src = strip_comments((RENDER_SRC / "motion.ts").read_text(encoding="utf-8"))
+    exported = set(re.findall(r"export const (\w+)", src))
+    assert {"reveal", "build", "focusAmount", "resolveAmount"} <= exported
+
+
+def test_every_cue_kind_maps_to_a_verb():
+    """The signal designer's four kinds are all ATTENTION events (§12 level 3),
+    so all four are FOCUS — differing in what they change, not in when."""
+    src = (RENDER_SRC / "motion.ts").read_text(encoding="utf-8")
+    for kind in ("highlight", "pointer", "scale_pulse", "dim"):
+        assert re.search(rf"{kind}: \"focus\"", src), f"{kind} has no verb"
+
+
+def test_the_renderer_does_not_invent_cue_times():
+    """R3: the resolver computes a cue's time from its span anchor before
+    anything renders. A renderer picking its own would be a second opinion
+    about §13 narration synchronisation, and the anchored one is right."""
+    src = strip_comments((RENDER_SRC / "motion.ts").read_text(encoding="utf-8"))
+    assert "atSeconds" in src, "focus must be driven by the resolved time"
+    for invented in ("Math.random", "Date.now", "new Date"):
+        assert invented not in src
+
+
+def test_focus_scale_cannot_exceed_the_spec_ceiling():
+    """§10.3 allows "only 1–3%". The PRD's §9.2 permits up to 120%; the design
+    system is stricter and sits inside that bound, so the stricter wins."""
+    src = (RENDER_SRC / "motion.ts").read_text(encoding="utf-8")
+    assert "MAX_FOCUS_SCALE" in src
+    assert "Math.min(1," in src, "the focus amount must be clamped"
+
+
+def test_structural_elements_are_not_animated():
+    """§12 level 1: "No animation or extremely subtle entrance" for grids,
+    dividers, card borders, baselines."""
+    src = strip_comments((RENDER_SRC / "Scene.tsx").read_text(encoding="utf-8"))
+    baseline = src[src.find("the lane's own baseline"):][:400]
+    assert "enter(" not in baseline and "buildStep(" not in baseline
+
+
+def test_transition_lives_in_assembly_not_in_the_renderer():
+    """§10.5's TRANSITION is between concepts, which here means between scenes.
+    §11.4 models that as a first-class node with its own cache key. Doing it in
+    both places would put transitions in two."""
+    src = strip_comments((RENDER_SRC / "motion.ts").read_text(encoding="utf-8"))
+    assert "export const transition" not in src
+    from explainer import assembly
+    assert hasattr(assembly, "Transition")
