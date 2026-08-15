@@ -1123,3 +1123,63 @@ Two of the five are blocked on things other than design, which is worth knowing
 before anyone schedules the work: `ui_walkthrough`'s subject is an **asset** and
 `series_build` has **no chart renderer** — §15 specifies how a chart should
 behave and there is nothing there to move.
+
+---
+
+## ISSUE-21 — §10.4 RESOLVE is a verb with no producer · OPEN
+
+**The question that found it: does anything in the pipeline decide when a scene
+is showing a RESOLVED state?** No. And that is the gap, not the renderer.
+
+### What the pipeline can say
+
+`signal_designer` emits exactly four cue kinds, and §9.2 of the PRD fixes that
+list: `highlight`, `pointer`, `scale_pulse`, `dim`. Every one is an **attention**
+event — §12 level 3, "look here". **None of them means "this is the answer".**
+
+So of §3's four semantic roles, measured across the finished 195 s video:
+
+| role | meaning | present in | produced by |
+|---|---|---:|---|
+| `signal` | look here / being discussed | **17.4%** of the video | cues, from the signal designer |
+| `answer` | correct, resolved, confirmed | **4.3%** | nothing — see below |
+| `warning` | be careful | **0%** | nothing at all |
+| `error` | wrong, broken, failed | **0%** | nothing at all |
+
+### Where the 4.3% of green actually comes from
+
+Not from the pipeline. From two structural guesses in the renderer:
+
+1. **`table_build.highlight_row`** — a planner-emitted slot meaning "the row
+   that matters". Closest thing to a resolution signal that exists, and it is a
+   layout hint, not a semantic one. Set on 1 of the 2 table scenes.
+2. **the last step of a `state_timeline`** — the renderer assuming the final
+   step of a build is its resolution.
+
+Both fire only in the last ~10% of a scene, which is why green reads as absent:
+it appears on small elements, late, in 3 of 9 scenes.
+
+**`warning` and `error` have no producer whatsoever.** Nothing in the pipeline
+can say "this option is wrong" or "be careful here", so those two roles are
+defined, tested for distinctness, and unreachable.
+
+### Why this is not fixed here
+
+§3's whole argument is that "look here" and "this is the resolved answer" must
+be visually distinct. They are — in the token layer. What is missing is anything
+upstream that knows which is which, and inventing one means either:
+
+1. **a fifth cue kind** (`resolve`), which contradicts §9.2's fixed list of four
+   and would be me editing the PRD by writing code; or
+2. **a planner field** — the visual planner naming which element a scene
+   resolves to, and which element is an error or a caution. This respects §9.2
+   (it is not a signalling event) and gives §10.4 a real producer.
+
+Option 2 is the better shape and it is a schema change plus a prompt change plus
+a decision about what the four roles mean pedagogically — which is Sanket's call,
+not the renderer's. `key_phrase.emphasis` already hints at the pattern: the
+design system §9.3 says that slot is the RESOLUTION, so the template knows, and
+nothing tells it.
+
+**Until then the semantic colour system is half-wired and should be described
+that way**: one role live, one barely, two unreachable.

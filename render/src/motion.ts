@@ -118,16 +118,48 @@ export const started = (
 export const focusAmount = (
   seconds: number,
   atSeconds: number,
-  holdSeconds = 1.2,
+  releaseSeconds: number | null = null,
 ): number => {
   const rise = motion.focus.ms / 1000;
+  if (releaseSeconds === null) {
+    // PERSISTS. §8: "Every frame should have exactly one dominant visual
+    // question." Emphasis that reverts to neutral after a fixed hold answers
+    // that question for 1.5 s and then stops answering it, which is why the
+    // old behaviour read as a flash rather than as attention.
+    return interpolate(seconds, [atSeconds, atSeconds + rise], [0, 1], {
+      extrapolateLeft: "clamp",
+      extrapolateRight: "clamp",
+      easing,
+    });
+  }
+  // Superseded by a later cue: decay over the same band, so attention MOVES
+  // rather than blinking off. §10.3: "surrounding content does not disappear."
   return interpolate(
     seconds,
-    [atSeconds, atSeconds + rise, atSeconds + holdSeconds,
-     atSeconds + holdSeconds + rise],
+    [atSeconds, atSeconds + rise, releaseSeconds, releaseSeconds + rise],
     [0, 1, 1, 0],
     { extrapolateLeft: "clamp", extrapolateRight: "clamp", easing },
   );
+};
+
+/**
+ * Blend a neutral colour toward an emphasis colour by `amount`.
+ *
+ * The focus amount was previously computed and then thrown away by a
+ * `> 0.01` boolean threshold, which collapsed §10.3's 340 ms rise into a
+ * single frame — the strobe. Emphasis is now continuous.
+ */
+export const mix = (from: string, to: string, amount: number): string => {
+  const a = Math.max(0, Math.min(1, amount));
+  const hex = (c: string) => [
+    parseInt(c.slice(1, 3), 16),
+    parseInt(c.slice(3, 5), 16),
+    parseInt(c.slice(5, 7), 16),
+  ];
+  const [r1, g1, b1] = hex(from);
+  const [r2, g2, b2] = hex(to);
+  const ch = (x: number, y: number) => Math.round(x + (y - x) * a);
+  return `rgb(${ch(r1, r2)}, ${ch(g1, g2)}, ${ch(b1, b2)})`;
 };
 
 /**

@@ -5,7 +5,7 @@ import {
   font, space, type as typeScale,
 } from "./tokens";
 import {
-  build, focusAmount, focusScale, reveal, resolveAmount, started,
+  build, focusAmount, focusScale, mix, reveal, resolveAmount, started,
 } from "./motion";
 
 /**
@@ -81,9 +81,17 @@ const cells = (row: unknown): string[] => {
   return Array.isArray(c) ? c.map((x) => asText(x)) : [];
 };
 
-/** §3: a cued text element takes the signal role — "look here". */
-const cuedText = (on: boolean): React.CSSProperties =>
-  on ? { color: color.signal } : {};
+/**
+ * §3: an emphasised text element moves toward the signal role — "look here".
+ *
+ * CONTINUOUS, not boolean. The previous version took `isCued()` and switched
+ * colour in one frame, which collapsed §10.3's 340 ms rise into a step — the
+ * strobe. `amount` comes from `focusAmount`.
+ */
+const emphasis = (amount: number, to: string = color.signal): React.CSSProperties =>
+  amount <= 0.001
+    ? {}
+    : { color: mix(color.ink, to, amount) };
 
 // ------------------------------------------------------------ the shell
 
@@ -102,14 +110,20 @@ export const Scene: React.FC<SceneProps> = ({
   // §10.3 FOCUS. The cue's TIME came from the resolver, which computed it from
   // the cue's span anchor (R3); this only shapes the moment around it. A
   // target's focus is the strongest of the cues pointing at it.
+  const ordered = [...cues].sort((a, b) => a.atSeconds - b.atSeconds);
   const focusOf = (target: string): number =>
-    cues.reduce(
-      (best, c) =>
-        c.target === target
-          ? Math.max(best, focusAmount(seconds, c.atSeconds))
-          : best,
-      0,
-    );
+    ordered.reduce((best, c, i) => {
+      if (c.target !== target) return best;
+      // §8: one dominant visual question. Emphasis persists until a LATER cue
+      // takes over, then decays — attention MOVES rather than blinking off.
+      const next = ordered
+        .slice(i + 1)
+        .find((n) => n.target !== target);
+      return Math.max(
+        best,
+        focusAmount(seconds, c.atSeconds, next ? next.atSeconds : null),
+      );
+    }, 0);
   const cueFocus = (slot: string, i: number, id?: string): number =>
     Math.max(
       focusOf(slot),
@@ -238,8 +252,15 @@ const Body: React.FC<{
   const shown = (i: number, n: number, slot?: string) =>
     started(frame, i, n, durationInFrames) ||
     (slot ? narrationReached(slot, i) : false);
-  /** §12 level 4 — the scene's resolution. */
-  const resolved = resolveAmount(frame, fps, durationInFrames) > 0.5;
+  /**
+   * §12 level 4 — the scene's resolution, as a CONTINUOUS 0..1.
+   *
+   * `resolved` (the boolean) switched the answer colour in a single frame,
+   * which is the FOCUS strobe one layer up: §10.4 specifies a 400–700 ms
+   * transition "from neutral/signal to answer state", not a swap.
+   */
+  const resolveAmt = resolveAmount(frame, fps, durationInFrames);
+  const resolved = resolveAmt > 0.5;
 
   switch (template) {
     // ================================================== §9.1 cold_open
@@ -282,7 +303,8 @@ const Body: React.FC<{
               fontSize: px(t.display),
               fontWeight: t.display.weight,
               lineHeight: t.display.line,
-              ...cuedText(isCued("headline", 0)),
+              ...enter(1),
+              ...emphasis(cueFocus("headline", 0)),
             }}
           >
             {asText(slots.headline)}
@@ -328,7 +350,8 @@ const Body: React.FC<{
               fontSize: px(t.h1),
               fontWeight: t.h1.weight,
               lineHeight: t.h1.line,
-              ...cuedText(isCued("title", 0)),
+              ...enter(1),
+              ...emphasis(cueFocus("title", 0)),
             }}
           >
             {asText(slots.title)}
@@ -342,7 +365,7 @@ const Body: React.FC<{
                 color: color.inkMuted,
                 marginTop: space.md,
                 width: columns(9),
-                ...cuedText(isCued("subtitle", 0)),
+                ...emphasis(cueFocus("subtitle", 0)),
               }}
             >
               {asText(slots.subtitle)}
@@ -374,7 +397,8 @@ const Body: React.FC<{
               fontSize: px(t.display),
               fontWeight: t.display.weight,
               lineHeight: t.display.line,
-              ...cuedText(isCued("phrase", 0)),
+              ...enter(0),
+              ...emphasis(cueFocus("phrase", 0)),
             }}
           >
             {asText(slots.phrase)}
@@ -483,17 +507,19 @@ const Body: React.FC<{
               {steps.map((st, i) => {
                 if (laneOf(st) !== lane) return null;
                 if (!shown(i, steps.length, "steps")) return null;
-                const cued = isCued("steps", i);
+                const stepFocus = cueFocus("steps", i);
+                const cued = stepFocus > 0.001;
                 const isLast = i === steps.length - 1;
                 // §9.4: "The active state is blue. A confirmed resolution can
                 // become green." The final step is the resolution.
-                const isResolution = isLast && resolved;
-                const marker = cued
-                  ? color.signal
-                  : isResolution
-                    ? color.answer
-                    : color.structure;
-                const onMarker = marker === color.structure;
+                const stepResolve = isLast ? resolveAmt : 0;
+                const marker =
+                  stepFocus > 0.001
+                    ? mix(color.structure, color.signal, stepFocus)
+                    : stepResolve > 0.001
+                      ? mix(color.structure, color.answer, stepResolve)
+                      : color.structure;
+                const filled = stepFocus > 0.5 || stepResolve > 0.5;
                 return (
                   <div
                     key={i}
@@ -506,7 +532,8 @@ const Body: React.FC<{
                       marginTop: -space.lg,
                       // Wide enough that a short label does not wrap mid-phrase.
                       width: (axisWidth / stepCount) * 1.6,
-                      transform: "translateX(-50%)",
+                      ...buildStep(i, steps.length),
+                      transform: `translateX(-50%) scale(${focusScale(stepFocus)})`,
                     }}
                   >
                     <div
@@ -514,9 +541,9 @@ const Body: React.FC<{
                         width: 32,
                         height: 32,
                         borderRadius: 10,
-                        backgroundColor: onMarker ? color.surface : marker,
+                        backgroundColor: filled ? marker : color.surface,
                         border: `2px solid ${marker}`,
-                        color: onMarker ? color.inkMuted : color.surface,
+                        color: filled ? color.surface : color.inkMuted,
                         fontSize: px(t.label),
                         fontWeight: t.label.weight,
                         textAlign: "center",
@@ -532,7 +559,7 @@ const Body: React.FC<{
                         fontSize: px(t.body),
                         lineHeight: t.body.line,
                         textAlign: "center",
-                        color: cued ? color.signal : color.ink,
+                        ...emphasis(stepFocus),
                       }}
                     >
                       {label(st)}
@@ -586,8 +613,11 @@ const Body: React.FC<{
 
           {rows.map((r, i) => {
             if (!shown(i, rows.length, "rows")) return null;
-            const rowCued = isCued("rows", i);
-            const isAnswer = i === highlight && resolved;
+            const rowFocus = cueFocus("rows", i);
+            const rowCued = rowFocus > 0.001;
+            // Continuous: 0 until the resolution begins, then eased to 1
+            // over §10.4's band.
+            const answerAmt = i === highlight ? resolveAmt : 0;
             return (
               <div
                 key={i}
@@ -599,12 +629,14 @@ const Body: React.FC<{
                   borderBottom: `1px solid ${color.structureSubtle}`,
                   // §9.5: the current row takes the soft signal surface; the
                   // resolved row takes the answer surface — §3's distinction.
-                  backgroundColor: isAnswer
-                    ? color.answerSoft
-                    : rowCued
-                      ? color.surfaceSignal
-                      : color.surface,
+                  backgroundColor:
+                    answerAmt > 0.001
+                      ? mix(color.surface, color.answerSoft, answerAmt)
+                      : rowFocus > 0.001
+                        ? mix(color.surface, color.surfaceSignal, rowFocus)
+                        : color.surface,
                   lineHeight: t.body.line,
+                  ...buildStep(i, rows.length),
                 }}
               >
                 {cells(r).map((c, j) => (
@@ -614,13 +646,13 @@ const Body: React.FC<{
                       // Only the leading cell takes the accent, not the whole
                       // table — §9.5: "Do not color the entire table blue."
                       color:
-                        rowCued && j === 0
-                          ? color.signal
-                          : isAnswer && j === 0
-                            ? color.answer
+                        j === 0 && answerAmt > 0.001
+                          ? mix(color.ink, color.answer, answerAmt)
+                          : j === 0 && rowFocus > 0.001
+                            ? mix(color.ink, color.signal, rowFocus)
                             : color.ink,
                       fontWeight:
-                        rowCued || isAnswer
+                        rowCued || answerAmt > 0.5
                           ? t.bodyStrong.weight
                           : t.body.weight,
                     }}
@@ -656,7 +688,7 @@ const Body: React.FC<{
                 fontSize: px(t.h2),
                 fontWeight: t.h2.weight,
                 marginBottom: space.lg,
-                ...cuedText(isCued("caption", 0)),
+                ...emphasis(cueFocus("caption", 0)),
               }}
             >
               {heading}
@@ -682,6 +714,7 @@ const Body: React.FC<{
                     backgroundColor: cued
                       ? color.surfaceSignal
                       : color.surface,
+                    ...buildStep(i, flow.length),
                   }}
                 >
                   <div
@@ -745,7 +778,7 @@ const Body: React.FC<{
             style={{
               fontSize: px(t.h1),
               fontWeight: t.h1.weight,
-              ...cuedText(isCued("term", 0)),
+              ...emphasis(cueFocus("term", 0)),
             }}
           >
             {asText(slots.term)}
@@ -755,7 +788,7 @@ const Body: React.FC<{
               fontSize: px(t.body),
               color: color.inkMuted,
               marginTop: space.md,
-              ...cuedText(isCued("characteristic", 0)),
+              ...emphasis(cueFocus("characteristic", 0)),
             }}
           >
             {asText(slots.characteristic)}
@@ -798,6 +831,7 @@ const Body: React.FC<{
                       : color.surface,
                     borderRadius: 10,
                     color: cued ? color.signal : color.ink,
+                    ...buildStep(i, nodes.length),
                   }}
                 >
                   {label(n)}
@@ -832,7 +866,7 @@ const Body: React.FC<{
                   fontSize: px(t.body),
                   padding: `${space.xs}px 0`,
                   borderBottom: `1px solid ${color.structureSubtle}`,
-                  ...cuedText(isCued("series", i)),
+                  ...emphasis(cueFocus("series", i)),
                 }}
               >
                 {label(s)}
@@ -887,7 +921,7 @@ const Body: React.FC<{
                 style={{
                   fontSize: px(t.body),
                   padding: `${space.xs}px 0`,
-                  ...cuedText(isCued("steps", i)),
+                  ...emphasis(cueFocus("steps", i)),
                 }}
               >
                 {i + 1}. {label(s)}
