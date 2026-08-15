@@ -215,3 +215,66 @@ def test_the_easing_has_no_overshoot():
     pts = [float(x) for x in m.group(1).split(",")]
     assert len(pts) == 4
     assert all(0.0 <= p <= 1.0 for p in pts), f"overshooting easing: {pts}"
+
+
+# ------------------------------------------- §4/§5: layout uses the scale
+
+_SPACING_PROPS = ("padding", "paddingTop", "paddingBottom", "paddingLeft",
+                  "paddingRight", "margin", "marginTop", "marginBottom",
+                  "marginLeft", "marginRight", "gap", "rowGap", "columnGap")
+
+# §2 gives radius 10 and small radius 8; they are design-system values, not
+# spacing, so they are allowed where a radius is set.
+_ALLOWED_RADII = {8, 10}
+
+
+def test_no_layout_value_falls_outside_the_spacing_scale():
+    """§5: 'Avoid random values such as 37, 53, 71.' A layout number that is
+    not on the scale is a decision nobody made."""
+    from_scale = {12, 16, 24, 32, 48, 64, 96, 128, 0}
+    offenders = {}
+    for p in components():
+        src = strip_comments(p.read_text(encoding="utf-8"))
+        for prop in _SPACING_PROPS:
+            for raw in re.findall(rf"\b{prop}: (\d+)[,\s]", src):
+                if int(raw) not in from_scale:
+                    offenders.setdefault(p.name, []).append(f"{prop}: {raw}")
+    assert not offenders, (
+        f"off-scale layout values: {offenders}. §5's scale is "
+        f"12/16/24/32/48/64/96/128.")
+
+
+def test_border_radii_come_from_the_design_system():
+    for p in components():
+        src = strip_comments(p.read_text(encoding="utf-8"))
+        for raw in re.findall(r"borderRadius: (\d+)", src):
+            assert int(raw) in _ALLOWED_RADII, (
+                f"{p.name}: radius {raw} is not the system's 8 or 10")
+
+
+def test_the_scene_shell_no_longer_centres_its_content():
+    """ISSUE-17: `justifyContent: center` on a column with one short child
+    centres that child and leaves the bottom 30-40% dead. §9 asks for the
+    opposite on every template."""
+    src = (RENDER_SRC / "Scene.tsx").read_text(encoding="utf-8")
+    assert 'justifyContent: "center"' not in strip_comments(src)
+
+
+def test_the_content_region_is_derived_from_the_canvas_tokens():
+    """The learner should recognise the same content boundary across templates
+    (§4), which requires one boundary rather than per-template padding."""
+    src = strip_comments((RENDER_SRC / "Scene.tsx").read_text(encoding="utf-8"))
+    for name in ("contentLeft", "contentTop", "contentWidth", "contentHeight"):
+        assert name in src, f"the shell must place using {name}"
+
+
+def test_the_content_region_clears_the_caption_zone():
+    """Arithmetic, not intent: content must end above the captions."""
+    src = TOKENS.read_text(encoding="utf-8")
+    def val(name):
+        return int(re.search(rf"{name}: (\d+)", src).group(1))
+    height, top = val("height"), val("marginTop")
+    usable = height - top - val("captionZone") - val("marginBottom")
+    assert usable > 0
+    assert top + usable <= height - val("captionZone"), (
+        "content region overlaps §16.2's caption exclusion zone")

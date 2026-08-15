@@ -1,6 +1,9 @@
 import React from "react";
 import { AbsoluteFill, useCurrentFrame, useVideoConfig } from "remotion";
-import { color, font } from "./tokens";
+import {
+  canvas, color, columns, contentHeight, contentLeft, contentTop,
+  contentWidth, font, space, type as typeScale,
+} from "./tokens";
 
 /**
  * THE R8 BOUNDARY.
@@ -105,22 +108,58 @@ export const Scene: React.FC<SceneProps> = ({
       style={{
         backgroundColor: color.surface,
         color: color.ink,
-        // §11.3: system fonts only. A webfont is a network fetch at render time
-        // and a font-loading race; both are named hermeticity failures.
         fontFamily: font.sans,
-        padding: 96,
-        paddingBottom: safeBottomPx + 48,
-        display: "flex",
-        flexDirection: "column",
-        justifyContent: "center",
       }}
     >
-      <Body
-        template={template}
-        slots={slots}
-        progress={progress}
-        minFontPx={minFontPx}
-        isCued={isCued}
+      {/*
+        §4's safe content region, as an absolutely positioned box rather than
+        padding on a centred flex column.
+      
+        The old shell was `padding: 96` + `justifyContent: center`, which is
+        why every scene sat in the upper-left with the bottom 30–40% dead
+        (ISSUE-17): a centred column with one short child centres that child
+        and leaves everything else empty. §9 asks for the opposite —
+        "Do not vertically center title cards", "Do not center the sentence
+        vertically by default" — because a learner should recognise the same
+        content boundary across templates, and a box that moves with its
+        contents is not a boundary.
+      
+        Every template now places INSIDE this region and owns its own vertical
+        anchor.
+      */}
+      <div
+        style={{
+          position: "absolute",
+          left: contentLeft,
+          top: contentTop,
+          width: contentWidth,
+          height: contentHeight,
+        }}
+      >
+        <Body
+          template={template}
+          slots={slots}
+          progress={progress}
+          minFontPx={minFontPx}
+          isCued={isCued}
+        />
+      </div>
+
+      {/*
+        §16.2's caption exclusion zone. Rendered as nothing, reserved as
+        layout: `contentHeight` already subtracts it, so this element exists
+        only to make the reservation visible to anyone reading the component.
+        `captionSafeBottom` comes from the template registry and is asserted
+        against §16.2's 15% by the accessibility linter.
+      */}
+      <div
+        style={{
+          position: "absolute",
+          left: 0,
+          right: 0,
+          bottom: 0,
+          height: safeBottomPx,
+        }}
       />
     </AbsoluteFill>
   );
@@ -177,7 +216,7 @@ const Body: React.FC<{
             <div
               style={{
                 fontSize: mid,
-                marginTop: 28,
+                marginTop: space.md,
                 color: color.inkMuted,
                 ...cued(isCued("emphasis", 0)),
               }}
@@ -202,7 +241,7 @@ const Body: React.FC<{
           {asText(slots.subtitle) ? (
             <div
               style={{
-                fontSize: mid, color: color.inkMuted, marginTop: 24,
+                fontSize: mid, color: color.inkMuted, marginTop: space.md,
                 ...cued(isCued("subtitle", 0)),
               }}
             >
@@ -219,7 +258,7 @@ const Body: React.FC<{
                         ...cued(isCued("term", 0)) }}>
             {asText(slots.term)}
           </div>
-          <div style={{ fontSize: mid, color: color.inkMuted, marginTop: 24,
+          <div style={{ fontSize: mid, color: color.inkMuted, marginTop: space.md,
                         ...cued(isCued("characteristic", 0)) }}>
             {asText(slots.characteristic)}
           </div>
@@ -261,9 +300,9 @@ const Body: React.FC<{
             style={{
               display: "grid",
               gridTemplateColumns: grid,
-              gap: "0 40px",
+              gap: `0 ${canvas.gutter}px`,
               fontWeight: 700,
-              paddingBottom: 14,
+              paddingBottom: space.xs,
               borderBottom: `3px solid ${color.structure}`,
             }}
           >
@@ -281,8 +320,8 @@ const Body: React.FC<{
                 style={{
                   display: "grid",
                   gridTemplateColumns: grid,
-                  gap: "0 40px",
-                  padding: "16px 0",
+                  gap: `0 ${canvas.gutter}px`,
+                  padding: `${space.sm}px 0`,
                   borderBottom: `1px solid ${color.structureSubtle}`,
                   color: cued ? color.signal : color.ink,
                   fontWeight: cued ? 700 : 400,
@@ -344,8 +383,8 @@ const Body: React.FC<{
             style={{
               display: "grid",
               gridTemplateColumns: grid,
-              gap: "0 48px",
-              paddingBottom: 14,
+              gap: `0 ${canvas.gutter}px`,
+              paddingBottom: space.xs,
               borderBottom: `3px solid ${color.structure}`,
             }}
           >
@@ -366,8 +405,8 @@ const Body: React.FC<{
           {asText(slots.invariant) ? (
             <div
               style={{
-                margin: "20px 0 28px",
-                padding: "12px 20px",
+                margin: `${space.md}px 0 ${space.lg}px`,
+                padding: `${space.xs}px ${space.md}px`,
                 border: `1px solid ${color.signalBorder}`,
                 borderRadius: 10,
                 color: color.inkMuted,
@@ -388,8 +427,8 @@ const Body: React.FC<{
                 style={{
                   display: "grid",
                   gridTemplateColumns: grid,
-                  gap: "0 48px",
-                  padding: "10px 0",
+                  gap: `0 ${canvas.gutter}px`,
+                  padding: `${space.xs}px 0`,
                 }}
               >
                 {tracks.map((_, col) => (
@@ -399,7 +438,7 @@ const Body: React.FC<{
                       // Only the owning lane draws; the others hold the column
                       // open so later steps stay aligned under their track.
                       visibility: col === lane ? "visible" : "hidden",
-                      padding: "12px 18px",
+                      padding: `${space.xs}px ${space.sm}px`,
                       borderLeft: `6px solid ${cued ? color.signal : color.ink}`,
                       backgroundColor: cued ? color.surfaceSignal : color.surfaceSubtle,
                       color: cued ? color.signal : color.ink,
@@ -424,7 +463,7 @@ const Body: React.FC<{
               {asText(slots.title)}
             </div>
           ) : null}
-          <div style={{ display: "flex", gap: 48, flexWrap: "wrap" }}>
+          <div style={{ display: "flex", gap: space.xl, flexWrap: "wrap" }}>
             {nodes.map((n, i) => {
               const id =
                 n && typeof n === "object"
@@ -435,9 +474,9 @@ const Body: React.FC<{
                   key={i}
                   style={{
                     fontSize: mid,
-                    padding: "24px 32px",
+                    padding: `${space.md}px ${space.lg}px`,
                     border: `4px solid ${isCued("nodes", i, id) ? color.signal : color.ink}`,
-                    borderRadius: 12,
+                    borderRadius: 10,
                     color: isCued("nodes", i, id) ? color.signal : color.ink,
                   }}
                 >
@@ -461,7 +500,7 @@ const Body: React.FC<{
           ) : null}
           {series.map((s, i) =>
             revealed(i, series.length, progress) ? (
-              <div key={i} style={{ padding: "10px 0",
+              <div key={i} style={{ padding: `${space.xs}px 0`,
                                     ...cued(isCued("series", i)) }}>
                 {label(s)}
               </div>
