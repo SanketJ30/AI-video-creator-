@@ -377,3 +377,27 @@ def test_transition_lives_in_assembly_not_in_the_renderer():
     assert "export const transition" not in src
     from explainer import assembly
     assert hasattr(assembly, "Transition")
+
+
+# ------------------------ §13/§14: what already existed, and what did not
+
+def test_narration_can_pull_an_element_forward():
+    """§13: the visual for a spoken idea should be visible when that idea is
+    being explained, "not several seconds before or after".
+
+    §14's disclosure is proportional to scene duration; §9.2's cues are anchored
+    to spans. The two clocks disagreed: on a 4-row table over 120 frames, row 3
+    disclosed at 3.2s while a cue anchored to a word spoken at 2.0s fired on it
+    1.2s earlier — emphasising a row that was not on screen."""
+    src = strip_comments((RENDER_SRC / "Scene.tsx").read_text(encoding="utf-8"))
+    assert "narrationReached" in src
+    assert "cueStartOf" in src, "the pull-forward must use the cue's own time"
+
+
+def test_disclosure_never_un_reveals_an_item():
+    """§9.4: "Previously introduced information should remain visible ... this
+    preserves the learner's mental map." §9.5: "old rows stay stable"."""
+    src = (RENDER_SRC / "motion.ts").read_text(encoding="utf-8")
+    assert "frame >= ((index + 1) / (count + 1)) * durationInFrames" in src, (
+        "`started` must be monotonic in frame; an item that un-reveals breaks "
+        "the learner's mental map")

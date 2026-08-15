@@ -119,6 +119,37 @@ export const Scene: React.FC<SceneProps> = ({
   const isCued = (slot: string, i: number, id?: string) =>
     cueFocus(slot, i, id) > 0.01;
 
+  /*
+    §13 NARRATION SYNCHRONISATION, using the anchors that already exist.
+
+    §14's disclosure order is proportional to scene duration, but §9.2's cues
+    are anchored to SPANS — the narration. Those two clocks disagree, and the
+    disagreement is visible: on a 4-row table over 120 frames, row 3 is
+    disclosed at 3.2 s while a cue anchored to a word spoken at 2.0 s fires on
+    it 1.2 s EARLIER. The renderer would emphasise a row that is not on screen.
+
+    §13: "The visual corresponding to a spoken idea should be visible when that
+    idea is being explained, not several seconds before or after." So when the
+    narration reaches an element, that element is disclosed — the spoken time
+    wins over the proportional one, because the spoken time is the one anchored
+    to meaning.
+  */
+  const cueStartOf = (target: string): number | null =>
+    cues.reduce<number | null>(
+      (best, c) =>
+        c.target === target && (best === null || c.atSeconds < best)
+          ? c.atSeconds
+          : best,
+      null,
+    );
+  const narrationReached = (slot: string, i: number, id?: string): boolean =>
+    [slot, `${slot}[${i}]`, id ? `${slot}.${id}` : ""]
+      .filter(Boolean)
+      .some((target) => {
+        const at = cueStartOf(target);
+        return at !== null && seconds >= at;
+      });
+
   return (
     <AbsoluteFill
       style={{
@@ -148,6 +179,7 @@ export const Scene: React.FC<SceneProps> = ({
           minFontPx={minFontPx}
           isCued={isCued}
           cueFocus={cueFocus}
+          narrationReached={narrationReached}
           frame={frame}
           fps={fps}
           durationInFrames={durationInFrames}
@@ -176,11 +208,12 @@ const Body: React.FC<{
   minFontPx: number;
   isCued: (slot: string, i: number, id?: string) => boolean;
   cueFocus: (slot: string, i: number, id?: string) => number;
+  narrationReached: (slot: string, i: number, id?: string) => boolean;
   frame: number;
   fps: number;
   durationInFrames: number;
 }> = ({
-  template, slots, minFontPx, isCued, cueFocus, frame, fps,
+  template, slots, minFontPx, isCued, cueFocus, narrationReached, frame, fps,
   durationInFrames,
 }) => {
   const t = typeScale;
@@ -195,9 +228,16 @@ const Body: React.FC<{
   /** §12 level 2 — content being constructed, one item at a time (§10.2). */
   const buildStep = (i: number, n: number) =>
     build(frame, fps, i, n, durationInFrames);
-  /** §14 — has item i been disclosed yet? */
-  const shown = (i: number, n: number) =>
-    started(frame, i, n, durationInFrames);
+  /**
+   * §14 — has item i been disclosed yet?
+   *
+   * Either the scene has progressed past its share (§14's proportional
+   * disclosure) OR the narration has reached it (§13). The second is what
+   * stops a cue emphasising an element that is not on screen.
+   */
+  const shown = (i: number, n: number, slot?: string) =>
+    started(frame, i, n, durationInFrames) ||
+    (slot ? narrationReached(slot, i) : false);
   /** §12 level 4 — the scene's resolution. */
   const resolved = resolveAmount(frame, fps, durationInFrames) > 0.5;
 
@@ -442,7 +482,7 @@ const Body: React.FC<{
 
               {steps.map((st, i) => {
                 if (laneOf(st) !== lane) return null;
-                if (!shown(i, steps.length)) return null;
+                if (!shown(i, steps.length, "steps")) return null;
                 const cued = isCued("steps", i);
                 const isLast = i === steps.length - 1;
                 // §9.4: "The active state is blue. A confirmed resolution can
@@ -545,7 +585,7 @@ const Body: React.FC<{
           </div>
 
           {rows.map((r, i) => {
-            if (!shown(i, rows.length)) return null;
+            if (!shown(i, rows.length, "rows")) return null;
             const rowCued = isCued("rows", i);
             const isAnswer = i === highlight && resolved;
             return (
@@ -624,7 +664,7 @@ const Body: React.FC<{
           ) : null}
 
           {flow.map((node, i) => {
-            if (!shown(i, flow.length)) return null;
+            if (!shown(i, flow.length, "steps")) return null;
             const cued = isCued("steps", i) || isCued("caption", i);
             const isLast = i === flow.length - 1;
             return (
@@ -740,7 +780,7 @@ const Body: React.FC<{
           ) : null}
           <div style={{ display: "flex", gap: space.md, flexWrap: "wrap" }}>
             {nodes.map((n, i) => {
-              if (!shown(i, nodes.length)) return null;
+              if (!shown(i, nodes.length, "nodes")) return null;
               const id = asText((n as Record<string, unknown>)?.id);
               const cued = isCued("nodes", i, id);
               return (
@@ -785,7 +825,7 @@ const Body: React.FC<{
             </div>
           ) : null}
           {series.map((s, i) =>
-            shown(i, series.length) ? (
+            shown(i, series.length, "series") ? (
               <div
                 key={i}
                 style={{
@@ -816,7 +856,7 @@ const Body: React.FC<{
           }}
         >
           {steps.map((s, i) =>
-            shown(i, steps.length) ? (
+            shown(i, steps.length, "steps") ? (
               <div
                 key={i}
                 style={{
@@ -841,7 +881,7 @@ const Body: React.FC<{
       return (
         <div style={{ width: columns(9) }}>
           {steps.map((s, i) =>
-            shown(i, steps.length) ? (
+            shown(i, steps.length, "steps") ? (
               <div
                 key={i}
                 style={{
