@@ -61,8 +61,9 @@ def _longest_run(deltas: list[int]) -> int:
     return best
 
 
-def measure(tmp_path, name, template, slots, cues, frames):
-    r = render.render_scene(name, template, slots, cues, frames)
+def measure(tmp_path, name, template, slots, cues, frames, state="neutral"):
+    r = render.render_scene(name, template, slots, cues, frames,
+                            resolution_state=state)
     work = tmp_path / name
     work.mkdir()
     try:
@@ -124,12 +125,16 @@ def test_focus_is_spread_and_does_not_strobe(tmp_path):
 
 def test_resolve_is_spread_across_the_spec_band(tmp_path):
     """§10.4 RESOLVE: 400–700 ms — "transition from neutral/signal to answer
-    state"."""
+    state".
+
+    Driven by the scene's `resolution_state`, which the visual planner sets
+    (ISSUE-21). It used to be driven by `highlight_row`, which was the renderer
+    inferring pedagogy from layout structure."""
     deltas = measure(tmp_path, "v_resolve", "table_build",
                      {"columns": ["Option", "Cost"],
                       "rows": [{"cells": ["SERIALIZABLE", "retry"]},
-                               {"cells": ["Table lock", "stalls"]}],
-                      "highlight_row": 0}, [], 90)
+                               {"cells": ["Table lock", "stalls"]}]}, [], 90,
+                     state="resolved")
     tail = deltas[int(len(deltas) * 0.85):]
     assert _longest_run(tail) >= 4, (
         "RESOLVE produced no spread change at the end of the scene; §10.4 "
@@ -164,3 +169,33 @@ def test_transition_is_not_implemented_in_the_renderer():
     src = (render.RENDER_DIR / "src" / "motion.ts").read_text(encoding="utf-8")
     assert "export const transition" not in src
     assert hasattr(assembly, "Transition")
+
+
+def test_a_neutral_scene_has_no_state_treatment(tmp_path):
+    """`neutral` means no state claim, so nothing settles into a state colour.
+    A scene that tinted anyway would be asserting something the planner did not
+    say."""
+    neutral = render.render_scene(
+        "st_neutral", "table_build",
+        {"columns": ["Option", "Cost"],
+         "rows": [{"cells": ["SERIALIZABLE", "retry"]}]}, [], 60,
+        resolution_state="neutral")
+    resolved = render.render_scene(
+        "st_resolved", "table_build",
+        {"columns": ["Option", "Cost"],
+         "rows": [{"cells": ["SERIALIZABLE", "retry"]}]}, [], 60,
+        resolution_state="resolved")
+    assert neutral.hash != resolved.hash, (
+        "the scene state must reach the pixels, and the closure")
+
+
+def test_each_state_renders_differently(tmp_path):
+    """§3's four roles are only useful if they are visually distinct, and that
+    has to hold in the OUTPUT, not just the token file."""
+    slots = {"columns": ["Option"], "rows": [{"cells": ["SERIALIZABLE"]}]}
+    hashes = {
+        st: render.render_scene(f"st_{st}", "table_build", slots, [], 45,
+                                resolution_state=st).hash
+        for st in ("neutral", "broken", "caution", "resolved")
+    }
+    assert len(set(hashes.values())) == 4, f"states collapsed: {hashes}"

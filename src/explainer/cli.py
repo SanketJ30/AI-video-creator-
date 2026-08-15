@@ -1360,7 +1360,9 @@ def _video_timeline(conn, slug: str, video_ref: str):
                             "duration_target_seconds"),
                         "cues": spec.get("cues") or [],
                         "template": spec.get("template") or "",
-                        "slots": spec.get("slots") or {}})
+                        "slots": spec.get("slots") or {},
+                        "resolution_state": spec.get("resolution_state")
+                        or "neutral"})
     return video, rows, entries, resolver.resolve(entries), downgrades
 
 
@@ -1441,7 +1443,8 @@ def render(slug: str, video_ref: str,
                                f"diagnose", fg=typer.colors.RED))
 
         r = render_mod.render_scene(e["ref"], e["template"], e["slots"], cues,
-                                    timing.frames)
+                                    timing.frames,
+                                    resolution_state=e["resolution_state"])
         # Span lengths WITHOUT the inserted beats, so the mux can cut the
         # audio at the same boundaries the resolver planned against.
         span_lens = [sp["end"] - sp["start"] for sp in timing.spans]

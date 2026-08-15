@@ -51,6 +51,16 @@ type SceneProps = {
   captionSafeBottom: number;
   minFontPx: number;
   durationInFrames: number;
+  /**
+   * §3's semantic role for the WHOLE scene, decided by the visual planner from
+   * the narration and the Gagné slot (ISSUE-21).
+   *
+   * The renderer previously inferred this from layout structure — `highlight_row`
+   * meant "answer", the last step of a timeline meant "resolution". Both were
+   * the renderer deciding pedagogy from shape, and once a producer exists they
+   * are wrong even when they look right. Removed.
+   */
+  resolutionState: "neutral" | "broken" | "caution" | "resolved";
 };
 
 export const sceneSchemaDefaults: SceneProps = {
@@ -60,6 +70,7 @@ export const sceneSchemaDefaults: SceneProps = {
   captionSafeBottom: 0.15,
   minFontPx: 24,
   durationInFrames: 90,
+  resolutionState: "neutral",
 };
 
 // ------------------------------------------------------------- helpers
@@ -93,6 +104,22 @@ const emphasis = (amount: number, to: string = color.signal): React.CSSPropertie
     ? {}
     : { color: mix(color.ink, to, amount) };
 
+/**
+ * §3's roles for a scene-level state. `signal` is deliberately absent: it is the
+ * CUE-level role meaning "currently being discussed", and a scene does not have
+ * a "being discussed" state — every scene is being discussed.
+ */
+const STATE_INK: Record<string, string> = {
+  broken: color.error,
+  caution: color.warning,
+  resolved: color.answer,
+};
+const STATE_SURFACE: Record<string, string> = {
+  broken: color.errorSoft,
+  caution: color.warningSoft,
+  resolved: color.answerSoft,
+};
+
 // ------------------------------------------------------------ the shell
 
 export const Scene: React.FC<SceneProps> = ({
@@ -101,6 +128,7 @@ export const Scene: React.FC<SceneProps> = ({
   cues,
   captionSafeBottom,
   minFontPx,
+  resolutionState,
 }) => {
   const frame = useCurrentFrame();
   const { fps, durationInFrames, height } = useVideoConfig();
@@ -172,6 +200,32 @@ export const Scene: React.FC<SceneProps> = ({
         fontFamily: font.sans,
       }}
     >
+      {/*
+        §10.4 RESOLVE at scene level.
+
+        §3 gives `answerSoft`, `warningSoft` and `errorSoft` explicitly as
+        CONTAINER colours — "Answer/resolution container", "Error container".
+        A scene that is showing a state says so with its container, which is
+        what those tokens are for, and no element has to be singled out.
+
+        Fades in over §10.4's band near the end of the scene: "transition from
+        neutral/signal to answer state ... supporting content settles."
+      */}
+      {resolutionState !== "neutral" ? (
+        <div
+          style={{
+            position: "absolute",
+            left: 0,
+            top: 0,
+            right: 0,
+            bottom: safeBottomPx,
+            backgroundColor: STATE_SURFACE[resolutionState],
+            borderLeft: `${space.xs}px solid ${STATE_INK[resolutionState]}`,
+            opacity: resolveAmount(frame, fps, durationInFrames),
+          }}
+        />
+      ) : null}
+
       {/*
         §4's safe content region. Absolutely positioned rather than padding on a
         centred flex column: a centred column with one short child centres that
@@ -408,7 +462,20 @@ const Body: React.FC<{
               style={{
                 fontSize: px(t.h2),
                 fontWeight: t.h2.weight,
-                color: isCued("emphasis", 0) ? color.answer : color.inkMuted,
+                // §9.3 says this slot IS the resolution, and the template used
+                // to act on that by colouring a cued emphasis green. That was
+                // template-level pedagogy — the same class of inference as
+                // `highlight_row` meaning "answer", one level down.
+                //
+                // Replaced, not supplemented: emphasis takes the CUE-level
+                // signal role ("look here"), and whether the scene is showing a
+                // resolved state is `resolutionState`'s job. A key_phrase whose
+                // clause is a caveat rather than an answer now reads correctly,
+                // which it could not before.
+                color:
+                  cueFocus("emphasis", 0) > 0.001
+                    ? mix(color.inkMuted, color.signal, cueFocus("emphasis", 0))
+                    : color.inkMuted,
                 marginTop: space.lg,
               }}
             >
@@ -509,17 +576,16 @@ const Body: React.FC<{
                 if (!shown(i, steps.length, "steps")) return null;
                 const stepFocus = cueFocus("steps", i);
                 const cued = stepFocus > 0.001;
-                const isLast = i === steps.length - 1;
                 // §9.4: "The active state is blue. A confirmed resolution can
                 // become green." The final step is the resolution.
-                const stepResolve = isLast ? resolveAmt : 0;
+                // The last step is NOT assumed to be the resolution: that was
+                // the renderer inferring pedagogy from position. The scene's
+                // `resolutionState` says what state is being shown (ISSUE-21).
                 const marker =
                   stepFocus > 0.001
                     ? mix(color.structure, color.signal, stepFocus)
-                    : stepResolve > 0.001
-                      ? mix(color.structure, color.answer, stepResolve)
-                      : color.structure;
-                const filled = stepFocus > 0.5 || stepResolve > 0.5;
+                    : color.structure;
+                const filled = stepFocus > 0.5;
                 return (
                   <div
                     key={i}
@@ -585,10 +651,10 @@ const Body: React.FC<{
       const cols = asList(slots.columns).map(label);
       const rows = asList(slots.rows);
       const grid = `repeat(${Math.max(1, cols.length)}, 1fr)`;
-      const highlight =
-        typeof slots.highlight_row === "number"
-          ? (slots.highlight_row as number)
-          : -1;
+      // `highlight_row` is a LAYOUT hint — which row the scene is about. It is
+      // no longer read as "this row is the answer": that was the renderer
+      // deciding pedagogy from structure, and `resolutionState` is the producer
+      // now (ISSUE-21).
       return (
         <div style={{ width: "100%", fontSize: px(t.body) }}>
           <div
@@ -615,9 +681,7 @@ const Body: React.FC<{
             if (!shown(i, rows.length, "rows")) return null;
             const rowFocus = cueFocus("rows", i);
             const rowCued = rowFocus > 0.001;
-            // Continuous: 0 until the resolution begins, then eased to 1
-            // over §10.4's band.
-            const answerAmt = i === highlight ? resolveAmt : 0;
+
             return (
               <div
                 key={i}
@@ -630,11 +694,9 @@ const Body: React.FC<{
                   // §9.5: the current row takes the soft signal surface; the
                   // resolved row takes the answer surface — §3's distinction.
                   backgroundColor:
-                    answerAmt > 0.001
-                      ? mix(color.surface, color.answerSoft, answerAmt)
-                      : rowFocus > 0.001
-                        ? mix(color.surface, color.surfaceSignal, rowFocus)
-                        : color.surface,
+                    rowFocus > 0.001
+                      ? mix(color.surface, color.surfaceSignal, rowFocus)
+                      : color.surface,
                   lineHeight: t.body.line,
                   ...buildStep(i, rows.length),
                 }}
@@ -646,15 +708,10 @@ const Body: React.FC<{
                       // Only the leading cell takes the accent, not the whole
                       // table — §9.5: "Do not color the entire table blue."
                       color:
-                        j === 0 && answerAmt > 0.001
-                          ? mix(color.ink, color.answer, answerAmt)
-                          : j === 0 && rowFocus > 0.001
-                            ? mix(color.ink, color.signal, rowFocus)
-                            : color.ink,
-                      fontWeight:
-                        rowCued || answerAmt > 0.5
-                          ? t.bodyStrong.weight
-                          : t.body.weight,
+                        j === 0 && rowFocus > 0.001
+                          ? mix(color.ink, color.signal, rowFocus)
+                          : color.ink,
+                      fontWeight: rowCued ? t.bodyStrong.weight : t.body.weight,
                     }}
                   >
                     {c}

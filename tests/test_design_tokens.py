@@ -401,3 +401,44 @@ def test_disclosure_never_un_reveals_an_item():
     assert "frame >= ((index + 1) / (count + 1)) * durationInFrames" in src, (
         "`started` must be monotonic in frame; an item that un-reveals breaks "
         "the learner's mental map")
+
+
+# ============ ISSUE-21: the renderer no longer infers pedagogy from shape
+
+def test_the_renderer_reads_the_scene_state_rather_than_guessing():
+    src = strip_comments((RENDER_SRC / "Scene.tsx").read_text(encoding="utf-8"))
+    assert "resolutionState" in src
+    assert "STATE_INK" in src and "STATE_SURFACE" in src
+
+
+def test_highlight_row_no_longer_means_answer():
+    """It is a LAYOUT hint — which row the scene is about. Reading it as "this
+    row is the answer" was the renderer deciding pedagogy from structure."""
+    src = strip_comments((RENDER_SRC / "Scene.tsx").read_text(encoding="utf-8"))
+    assert "answerAmt" not in src
+    assert "highlight_row" not in src or "color.answer" not in src.split(
+        "table_build")[-1].split("concept_illustration")[0]
+
+
+def test_the_last_timeline_step_is_not_assumed_to_be_the_resolution():
+    src = strip_comments((RENDER_SRC / "Scene.tsx").read_text(encoding="utf-8"))
+    timeline = src[src.find("state_timeline"):src.find("table_build")]
+    assert "color.answer" not in timeline, (
+        "the last step's position must not imply resolution")
+
+
+def test_signal_is_not_available_as_a_scene_state():
+    """§3: `signal` is the cue-level role. A scene cannot be in a
+    "being discussed" state — every scene is."""
+    src = (RENDER_SRC / "Scene.tsx").read_text(encoding="utf-8")
+    block = src[src.find("const STATE_INK"):src.find("const STATE_SURFACE")]
+    assert "signal" not in block
+
+
+def test_key_phrase_emphasis_no_longer_decides_its_own_semantics():
+    """§9.3 says that slot IS the resolution, and the template acted on it by
+    colouring a cued emphasis green — template-level pedagogy, the same class
+    of inference as `highlight_row`. Replaced by the field, not supplemented."""
+    src = strip_comments((RENDER_SRC / "Scene.tsx").read_text(encoding="utf-8"))
+    kp = src[src.find('case "key_phrase"'):src.find('case "state_timeline"')]
+    assert "color.answer" not in kp

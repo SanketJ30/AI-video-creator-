@@ -66,7 +66,7 @@ def test_props_carry_no_renderer_concepts():
     props = render.scene_props("labelled_diagram",
                                {"nodes": [{"id": "a", "label": "A"}]}, [], 60)
     assert set(props) == {"durationInFrames", "template", "slots", "cues",
-                          "captionSafeBottom", "minFontPx"}
+                          "captionSafeBottom", "minFontPx", "resolutionState"}
     blob = str(props).lower()
     for banned in ("react", "jsx", "component", "css", "div", "style"):
         assert banned not in blob

@@ -127,7 +127,7 @@ def _npx() -> str:
 
 
 def scene_props(template_name: str, slots: dict, cues: list[dict],
-                frames: int = 0) -> dict:
+                frames: int = 0, resolution_state: str = "neutral") -> dict:
     """The renderer-agnostic spec, translated at the boundary and nowhere else."""
     t = templates.get(template_name)
     return {
@@ -140,6 +140,9 @@ def scene_props(template_name: str, slots: dict, cues: list[dict],
                  for c in (cues or [])],
         "captionSafeBottom": t.safe_area.bottom,
         "minFontPx": t.min_font_px,
+        # §3's scene-level semantic role, decided by the visual planner. In the
+        # closure, so a scene whose state changes re-renders.
+        "resolutionState": resolution_state or "neutral",
     }
 
 
@@ -169,9 +172,10 @@ def closure(props: dict, frames: int) -> str:
 
 def render_scene(scene_ref: str, template_name: str, slots: dict,
                  cues: list[dict], frames: int, *,
+                 resolution_state: str = "neutral",
                  force: bool = False) -> SceneRender:
     """Render one scene to a lossless intermediate. Cache hit skips Remotion."""
-    props = scene_props(template_name, slots, cues, frames)
+    props = scene_props(template_name, slots, cues, frames, resolution_state)
     h = closure(props, frames)
     st = store()
 

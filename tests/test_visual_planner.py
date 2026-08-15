@@ -40,7 +40,7 @@ def plan_json(entries):
 
 
 def entry(ref="s01", template="table_build", slots=None, motion="static_reveal",
-          changes=False, what_changes="", rationale="r"):
+          changes=False, what_changes="", rationale="r", state="neutral"):
     # A DESIGNED template (ISSUE-20): the planner is only offered templates
     # with a §9 layout, so a fixture using an undesigned one is now rejected.
     import json as _j
@@ -49,7 +49,8 @@ def entry(ref="s01", template="table_build", slots=None, motion="static_reveal",
                                    else {"columns": ["Option", "Cost"],
                                          "rows": [{"cells": ["SERIALIZABLE",
                                                              "retry"]}]}),
-            "motion": motion, "referent_changes_over_time": changes,
+            "motion": motion, "resolution_state": state,
+            "referent_changes_over_time": changes,
             "what_changes": what_changes, "rationale": rationale}
 
 
@@ -250,3 +251,46 @@ def test_the_template_catalogue_reaches_the_model():
     # model cannot choose what it is not shown.
     for undesigned in ("labelled_diagram", "terminal_replay", "ui_walkthrough"):
         assert undesigned not in sent
+
+
+# ============ ISSUE-21: resolution_state, a SCENE property not a cue kind
+
+def test_resolution_state_is_required_and_validated():
+    """A cue is an EVENT anchored to a span at a moment. "This scene shows the
+    broken state" is a property of the whole scene; encoding it as a point
+    event would be the wrong shape, and would add a fifth kind to §9.2's fixed
+    list of four."""
+    with pytest.raises(vp.ox.SchemaError) as e:
+        vp.parse(plan_json([entry(state="green")]), [scene()])
+    assert "resolution_state" in str(e.value)
+
+
+def test_the_four_states_are_the_ones_grounded_in_section_3():
+    assert vp.RESOLUTION_STATES == ("neutral", "broken", "caution", "resolved")
+
+
+def test_signal_is_not_a_scene_state():
+    """§3's `signal` means "currently being discussed" and stays a CUE-level
+    role. Every scene is being discussed, so it is not a state a scene can be
+    in."""
+    assert "signal" not in vp.RESOLUTION_STATES
+
+
+def test_the_state_reaches_the_visual_spec():
+    plans = vp.parse(plan_json([entry(state="resolved")]), [scene()])
+    spec = plans[0].visual_spec({})
+    assert spec["resolution_state"] == "resolved"
+
+
+def test_the_state_is_a_named_overridable_decision():
+    """§10: every AI decision is a named, addressable, overridable object."""
+    plans = vp.parse(plan_json([entry(state="broken")]), [scene()])
+    d = plans[0].visual_spec({})["decisions"]
+    assert d["resolution_state"]["value"] == "broken"
+    assert "ISSUE-21" in d["resolution_state"]["rule"]
+
+
+def test_every_state_survives_a_round_trip():
+    for st in vp.RESOLUTION_STATES:
+        plans = vp.parse(plan_json([entry(state=st)]), [scene()])
+        assert plans[0].resolution_state == st

@@ -63,6 +63,28 @@ MAX_TOKENS = 64000
 
 MOTIONS = ("animate", "static_reveal")
 
+# §3's semantic roles, as a SCENE-LEVEL property rather than a cue kind.
+#
+# A cue is an EVENT anchored to a span at a moment. "This scene shows the broken
+# state" is a property of the whole scene, and encoding it as a point event
+# would be the wrong shape — it would also add a fifth kind to §9.2's fixed list
+# of four, which is the PRD's decision and not this code's.
+#
+# AUTHORED AND REVIEWABLE — Sanket's pedagogical reading, recorded so it can be
+# argued with rather than inferred from the renderer:
+#
+#   neutral   explanation in progress, no state claim
+#   broken    the invariant violated — the on-call table at zero, the failed
+#             check. Takes §3's `error` role.
+#   caution   a cost or precondition — the retry requirement, the bottleneck.
+#             Takes §3's `warning` role.
+#   resolved  the remedy that works — SERIALIZABLE, the correct final state.
+#             Takes §3's `answer` role.
+#
+# `signal` is NOT in this list. It stays what it already is: the cue-level role
+# meaning "currently being discussed".
+RESOLUTION_STATES = ("neutral", "broken", "caution", "resolved")
+
 OUTPUT_SCHEMA: dict = {
     "type": "object",
     "properties": {
@@ -83,6 +105,8 @@ OUTPUT_SCHEMA: dict = {
                     # second one; it was never the API's job.
                     "slots_json": {"type": "string"},
                     "motion": {"type": "string", "enum": list(MOTIONS)},
+                    "resolution_state": {"type": "string",
+                                         "enum": list(RESOLUTION_STATES)},
                     "referent_changes_over_time": {"type": "boolean"},
                     "what_changes": {"type": "string"},
                     "rationale": {"type": "string"},
@@ -117,6 +141,7 @@ class ScenePlan:
     template: Template
     slots: dict
     motion: str
+    resolution_state: str
     referent_changes_over_time: bool
     what_changes: str
     rationale: str
@@ -136,6 +161,9 @@ class ScenePlan:
             "cues": [],
             "captionSafeArea": self.template.safe_area.to_json(),
             "motion": self.motion,
+            # §3's semantic state for the whole scene. The renderer reads this
+            # rather than guessing pedagogy from layout structure.
+            "resolution_state": self.resolution_state,
             "referent_changes_over_time": self.referent_changes_over_time,
             "what_changes": self.what_changes,
             # §10 makes the storyboard the surface a human edits, and a template
@@ -269,8 +297,17 @@ def parse(raw: str, scenes: list[dict]) -> list[ScenePlan]:
             int((wanted[ref].get("pedagogy_meta") or {}).get(
                 "duration_target_seconds") or 0))
 
+        state = str(s.get("resolution_state") or "").strip().lower()
+        if state not in RESOLUTION_STATES:
+            problems.append(
+                f"{ref}: resolution_state {s.get('resolution_state')!r} is not "
+                f"one of {list(RESOLUTION_STATES)}. It is a property of the "
+                f"whole scene: what state the learner is being shown.")
+            continue
+
         plans[ref] = ScenePlan(
             scene_ref=ref, template=template, slots=slots, motion=motion,
+            resolution_state=state,
             referent_changes_over_time=changes, what_changes=what.strip(),
             rationale=str(s.get("rationale") or "").strip(),
             decisions=[
@@ -278,6 +315,10 @@ def parse(raw: str, scenes: list[dict]) -> list[ScenePlan]:
                          "§9.1 Bloom-to-treatment; §4.4 composition priority"),
                 Decision("motion", motion,
                          "§8 animate only if the referent changes over time"),
+                Decision("resolution_state", state,
+                         "§3 semantic role for the whole scene; the renderer "
+                         "reads this rather than inferring pedagogy from "
+                         "layout structure (ISSUE-21)"),
                 Decision("caption_safe_area",
                          f"bottom {template.safe_area.bottom}",
                          "§16.2, from the template — not model-chosen"),

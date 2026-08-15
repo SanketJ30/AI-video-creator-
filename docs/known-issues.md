@@ -1126,7 +1126,7 @@ behave and there is nothing there to move.
 
 ---
 
-## ISSUE-21 — §10.4 RESOLVE is a verb with no producer · OPEN
+## ISSUE-21 — §10.4 RESOLVE is a verb with no producer · FIXED
 
 **The question that found it: does anything in the pipeline decide when a scene
 is showing a RESOLVED state?** No. And that is the gap, not the renderer.
@@ -1183,3 +1183,70 @@ nothing tells it.
 
 **Until then the semantic colour system is half-wired and should be described
 that way**: one role live, one barely, two unreachable.
+
+
+---
+
+## ISSUE-21 — resolved with a scene-level field, not a fifth cue kind
+
+**The shape argument decided it.** A cue is an EVENT anchored to a span at a
+moment. "This scene shows the broken state" is a property of the whole SCENE.
+Encoding a scene-level fact as a point event is the wrong shape and would fight
+the cue model later — and it would have added a fifth kind to §9.2's fixed list
+of four, which is the PRD's decision to make, not this code's.
+
+### `resolution_state`, set by the visual planner
+
+| value | meaning | §3 role |
+|---|---|---|
+| `neutral` | explanation in progress, no state claim | — |
+| `broken` | the invariant violated — the on-call table at zero, the failed check | `error` |
+| `caution` | a cost or precondition — the retry requirement, the bottleneck | `warning` |
+| `resolved` | the remedy that works — SERIALIZABLE, the correct final state | `answer` |
+
+**AUTHORED AND REVIEWABLE — Sanket's pedagogical reading**, recorded in
+`visual_planner.py` beside the constant so it can be argued with rather than
+inferred from the renderer's behaviour.
+
+`signal` is deliberately not a scene state: it means "currently being discussed"
+and stays the CUE-level role it already is. Every scene is being discussed, so
+it is not a state a scene can be in.
+
+The planner decides from the narration and the Gagné slot — a `feedback` slot
+revealing the correct answer is `resolved`, a `present` slot demonstrating the
+anomaly is `broken`. `prompts/visual_planner.v4.md` states the rule and its own
+failure mode: *"Do not mark a scene `resolved` because it ends well, or `broken`
+because the subject is a failure mode. Mark what the scene ITSELF shows."*
+
+### Both renderer-side guesses REMOVED
+
+1. **`highlight_row` meaning "answer"** — it is a layout hint saying which row
+   the scene is about, not a claim that the row is correct.
+2. **"the last step of a timeline is its resolution"** — position is not
+   pedagogy.
+
+Once a producer exists, these are wrong even when they look right, which is the
+worse failure: a structural guess that happens to agree is indistinguishable
+from a decision until it disagrees.
+
+### The confirming case: `key_phrase.emphasis`
+
+§9.3 says that slot IS the resolution, and the template acted on it by colouring
+a cued emphasis green. That was template-level pedagogy — the same class of
+inference as `highlight_row`, one level down.
+
+**Replaced, not supplemented.** Emphasis now takes the cue-level `signal` role
+("look here"), and whether the scene shows a resolved state is
+`resolution_state`'s job. A `key_phrase` whose clause is a *caveat* rather than
+an answer now reads correctly, which it could not before — the template had one
+opinion and no way to be told otherwise.
+
+### How a state renders
+
+§3 gives `answerSoft`, `warningSoft` and `errorSoft` explicitly as CONTAINER
+colours. A non-neutral scene fades its content container to the state's soft
+surface with a rule in the state colour, over §10.4's 400–700 ms band. No
+element is singled out, so nothing has to guess which element "is" the answer.
+
+Tested on rendered pixels: the four states produce four different scene hashes,
+and a `neutral` scene produces no state treatment at all.
