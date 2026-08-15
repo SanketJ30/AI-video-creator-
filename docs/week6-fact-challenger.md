@@ -315,3 +315,58 @@ Both are worth fixing and neither blocks.
 The narration changed, so the **storyboard and render are stale**. The shipped
 video on disk is the reverted narration. Re-storyboard and re-render before
 anything goes to an instructional designer.
+
+
+---
+
+## 8. Final state — the rendered video and its measured factual state
+
+**File:** `C:\Users\Sanket\projects\explainer-pipeline\var\render\mvcc-write-skew-v2.mp4`
+7.35 MB · 00:03:33.30 · 1920×1080 h264 30 fps · AAC mono 48 kHz, mean −17.6 dB.
+Measured runtime **213.30 s** against resolved **213.30 s** — zero drift.
+Budget 240 s, so 26.70 s under.
+
+### The factual state of THIS narration
+
+The narration in this render is byte-identical to the one measured at 3 samples
+in §7 — provenance `script_writer@v4`, and all six probed span ids from that run
+are still present. Storyboarding and rendering do not touch narration, so that
+measurement stands:
+
+| | result |
+|---|---|
+| **blocking** | **0 in all 3 samples** |
+| refuted | 0 / 1 / 2 per sample, max confidence 0.60 — all sub-threshold |
+| spans surviving all 3 samples | 20 / 25 |
+
+A confirmation run was started alongside the render and **stopped after sample 1
+when the Anthropic credit balance ran out**. Sample 1 agreed: 22 claims, 2
+refuted, **0 blocking**. That single pass is reported as a single pass and is
+not offered as a three-sample verdict — the three-sample number above is the
+earlier run on the identical narration.
+
+### Two open warnings, ISSUE-19
+
+Neither is a PostgreSQL semantics error and **neither is fixable by this
+pipeline**: `script_writer.generate` works on a whole video, there is no
+per-scene or per-span path, so the smallest response to a two-span problem is a
+25-span re-roll. Invariant 8 says that is not a fix. The missing capability is
+recorded as **E3** in `docs/editor-constraints.md`.
+
+### One new fit problem, correctly reported
+
+```
+s04: rigid scene pads 17% of its duration with silence; §15.3 budgets 15%.
+```
+
+The v4 narration is shorter than the one it replaced, so the 90 s rigid scene now
+holds 15.49 s of padding. ISSUE-14's redistribution spreads most of it across
+span boundaries rather than leaving it at the end, but the **total** is over
+§15.3's budget and the resolver says so. The honest fix is a shorter `present`
+slot or an elastic s04, not a larger budget.
+
+### Storyboard
+
+6 distinct templates — `cold_open`, `title_card`, `labelled_diagram`,
+`state_timeline`, `table_build` ×2, `key_phrase` ×3. Longest identical run 1.
+21 cues across 9 scenes, none at zero.
