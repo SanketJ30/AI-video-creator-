@@ -176,9 +176,24 @@ class Template:
     # — 17% of its duration against §15.3's 15% budget — to protect a tempo that
     # does not exist.
     #
-    # When a template with real beats arrives (a synced walkthrough, a
-    # music-locked build), it sets this and earns `rigid`. Until then, asking
-    # for rigid is asking for silence.
+    # CHECKED AGAINST THE DESIGN SYSTEM §9 and §10 — still False for all.
+    #
+    # §10 gives every motion verb a duration band in MILLISECONDS (REVEAL
+    # 300–500, BUILD 400–700, FOCUS 250–450, RESOLVE 400–700) and those are now
+    # implemented as fixed durations rather than fractions of the scene. §9.1
+    # goes further and choreographs a cold open's entrance to a 1.2–2.0 s total.
+    #
+    # Neither earns `rigid`. Both describe how long an ELEMENT takes to arrive,
+    # not how long the SCENE must last: a cold open with a 1.5 s entrance is
+    # equally correct at 8 s or at 15 s, because the entrance does not scale
+    # with the scene. And §13 makes the ordering narration-driven — "the
+    # animation should follow the spoken explanation" — which is the opposite of
+    # a visual holding its own tempo against the audio.
+    #
+    # A template earns this when its motion lands on beats the audio cannot
+    # move: a music-locked build, or a screen recording replayed at its captured
+    # rate. Nothing in §9 describes one. Until then, asking for rigid is asking
+    # for silence.
     intrinsic_tempo: bool = False
 
     def param(self, name: str) -> Param:

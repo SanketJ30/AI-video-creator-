@@ -97,3 +97,32 @@ The work was reading before writing. The one thing worth building was a
 five-line reconciliation of two clocks that had been quietly disagreeing since
 week 4, and it was only visible because the design system asked a question the
 pipeline had not been asked before.
+
+
+---
+
+## Result: what the ink metric did and did not measure
+
+Peak ink coverage across the finished video:
+
+| | before the design system | after |
+|---|---:|---:|
+| **peak** (densest scene) | 3.15% | **3.31%** |
+| **floor** (sparsest scene) | **0.43%** | **1.46%** |
+
+**The peak barely moved. The floor nearly quadrupled**, and that is the number
+that matters: there are no near-empty scenes left. ISSUE-15's two 0.43% frames —
+a caption alone in an empty 1080p frame — are gone, replaced by typographic
+compositions.
+
+**And the peak was the wrong thing to watch.** Ink coverage was built to catch
+blanks (`AUTHORED_MIN_INK_COVERAGE = 0.005`) and it does that well. It is a poor
+judge of a typographic design system, because §4 explicitly asks for "generous
+whitespace" and §8 asks that a frame have "exactly one dominant visual
+question". A well-composed course frame is *supposed* to be sparse in pixel
+terms; a 20%-ink frame would probably be violating §9.3's load thresholds.
+
+So the metric keeps its job — blank detection — and loses the job it was
+briefly doing by accident, which was standing in for "does this look designed".
+That question is answered by looking at a frame, which is how the column bug and
+the blank cold open were both found.
