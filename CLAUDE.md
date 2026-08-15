@@ -91,6 +91,63 @@ the next one will. Where the error is topic-specific, the input to change is
 semantics into a general prompt teaches every later course facts it does not
 need.
 
+## Named anti-patterns
+
+### THE BOOLEAN GATE — a visual property driven by a boolean
+
+**Diagnostic, applies without reading any surrounding code:** any visual
+property whose value is chosen by a boolean is either *not animating* or
+*animating something that cannot be interpolated*. Both are defects, and the
+second one is invisible in review because it looks like animation in the source.
+
+Found four times, each time by measuring pixels and never by reading code:
+
+| where | the boolean | what it did |
+|---|---|---|
+| `Scene.tsx` FOCUS | `focusAmount(...) > 0.01` | computed §10.3's 340 ms rise, then threw it away. Every blue event was a flat 1.4 s block with no rise and no decay — the strobe |
+| `concept_illustration` | `cued` | drove **five** properties at once — card border, card surface, marker fill, marker numeral, label ink. 6510 px, 5% of the frame, in ONE frame |
+| `table_build` | `rowCued` | `fontWeight: 400 → 600`. See below |
+| `Scene.tsx` scene level | `resolveAmt > 0.5` | dead by the time it was found, left over from a removed structural guess — the shape sitting unused, waiting to be wired to something |
+
+Two more of the same shape turned up in the sweep that followed
+(`state_timeline`'s `filled = stepFocus > 0.5` on a marker chip, and its lane
+label). Fixing them one template at a time is whack-a-mole; sweep for the
+pattern instead.
+
+**The fix is always the same:** keep the continuous 0..1 amount and `mix()`
+toward the emphasis colour. `mix(a, b, 0)` returns `a` exactly, so the uncued
+rendering is unchanged and the diff stays small.
+
+### `fontWeight` is the case worth memorising
+
+It is the one that **looks like animation in code and cannot be one in fact**.
+`fontWeight: cued ? 600 : 400` reads like every other conditional style, and a
+reviewer skims past it. But 400 and 600 are *different glyphs* — there is no
+interpolation, so a cued row un-bolds in a single frame the moment the focus
+decays. Measured on the finished video at s05 and s07: ~1000 px changing at
+once, max per-pixel delta 226, **identical colour sets before and after**. That
+last detail is the signature: a re-render at a different weight, not a recolour.
+
+The general rule this generalises to: **a property that is not numerically
+continuous cannot carry emphasis.** `fontWeight`, `fontFamily`, `display`,
+`textTransform`, `borderStyle` and any layout-affecting size all belong to the
+static description of an element, not to §10's verbs. §9.5 says the emphasis is
+colour — "row receives soft blue background, relevant cell receives signal
+emphasis" — and colour is chosen precisely because it interpolates.
+
+### Why review does not catch these
+
+None of the four were found by reading the diff; all four were found by
+measuring rendered frames. A boolean gate produces output that is *correct in
+every still frame* and wrong only between them, so a screenshot review passes it
+and so does any test asserting what a frame contains.
+
+`tests/test_motion_render.py` renders real frames and measures per-frame deltas
+for this reason. When you touch anything in `render/src/`, that suite is the
+gate — and note that two of its fixtures **passed on known-broken code** before
+their timing was corrected, so measure a new fixture and confirm it fails on the
+defect before you trust the assertion.
+
 ## Architecture in one screen
 
 ```
