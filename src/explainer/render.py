@@ -237,3 +237,86 @@ def frame_digest(hash_: str, frame: int = 0) -> str:
                 f"could not extract frame {frame}: "
                 f"{p.stderr.decode(errors='replace')[:400]}")
         return hashing.content_hash(png.read_bytes())
+
+
+# ------------------------------------------------------- ink coverage (§9.3)
+#
+# How much of the frame actually has content on it. Added because a scene can
+# pass every structural check and still be blank: v2 rendered three `cold_open`
+# scenes at 0.00% ink — 33s of a 218s video showing nothing — and no gate
+# noticed, because the frames were valid, the durations were right and the
+# renders were byte-identical.
+#
+# This is the visual twin of `assembly._assert_audible`. Both exist because the
+# pipeline verified reproducibility and structure while measuring nothing about
+# whether there was any signal in the output.
+
+# AUTHORED AND UNREVIEWED. v0.2 gives no ink-coverage number; §9.3 caps how much
+# may be on screen and says nothing about a floor. Measured on v2:
+#     cold_open  0.00%   (blank)
+#     s04 state_timeline  0.53% -> 2.14% across the scene
+#     s05 table_build     0.26% -> 4.24%
+# so 0.5% separates "blank" from "sparse but real". It is a floor for
+# CATCHING BLANKS, not a design target — a legible 1080p frame should be far
+# above it, and the fact that this corpus tops out at 4% is itself reportable.
+AUTHORED_MIN_INK_COVERAGE = 0.005
+
+# The Scene.tsx background. Kept here rather than imported because the renderer
+# owns its palette until Phase 5 binds a brand (week-4 D6).
+BACKGROUND_RGB = (247, 247, 244)
+
+
+def ink_coverage(hash_: str, frame: int = 0, tolerance: int = 12,
+                 step: int = 2) -> float:
+    """Fraction of sampled pixels in one rendered frame that are not background.
+
+    `step` subsamples the frame — at 1920x1080 every pixel is 2M reads per frame
+    and the number is a coverage estimate, not a checksum. Deterministic: the
+    same frame always yields the same value.
+    """
+    try:
+        from PIL import Image
+    except ImportError as e:  # pragma: no cover - environment problem
+        raise RenderError("Pillow is needed for ink coverage: pip install pillow") from e
+
+    with tempfile.TemporaryDirectory() as tmp:
+        src = Path(tmp) / f"in.{INTERMEDIATE_EXT}"
+        src.write_bytes(store().get(hash_))
+        png = Path(tmp) / "f.png"
+        p = subprocess.run(
+            [ffmpeg_exe(), "-hide_banner", "-loglevel", "error",
+             "-i", str(src), "-vf", r"select=eq(n\," + str(frame) + ")",
+             "-vsync", "0", "-frames:v", "1", str(png)],
+            capture_output=True)
+        if p.returncode != 0 or not png.exists():
+            raise RenderError(
+                f"could not extract frame {frame}: "
+                f"{p.stderr.decode(errors='replace')[:300]}")
+        im = Image.open(png).convert("RGB")
+
+    px = im.load()
+    w, h = im.size
+    inked = total = 0
+    for y in range(0, h, step):
+        for x in range(0, w, step):
+            r, g, b = px[x, y]
+            total += 1
+            if (abs(r - BACKGROUND_RGB[0]) > tolerance
+                    or abs(g - BACKGROUND_RGB[1]) > tolerance
+                    or abs(b - BACKGROUND_RGB[2]) > tolerance):
+                inked += 1
+    return inked / total if total else 0.0
+
+
+def coverage_profile(hash_: str, frames: int, samples: int = 4) -> list[float]:
+    """Ink coverage sampled across a scene.
+
+    Sampled rather than measured at frame 0 only, because a build template is
+    legitimately near-empty at its first frame — judging it there would flag
+    every animated scene in the corpus.
+    """
+    if frames <= 0:
+        return []
+    picks = sorted({min(frames - 1, int(frames * f))
+                    for f in [(i + 1) / (samples + 1) for i in range(samples)]})
+    return [ink_coverage(hash_, frame=f) for f in picks]

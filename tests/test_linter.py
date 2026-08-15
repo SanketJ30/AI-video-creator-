@@ -61,7 +61,9 @@ def test_a_clean_video_fires_nothing():
     work."""
     scenes = [
         scene("s01", template="cold_open", cues=0,
-              slots={"premise": "two doctors on call"}),
+              slots={"premise": "two doctors on call",
+                     # Required: without it the scene draws an empty frame.
+                     "headline": "Nobody on call"}),
         scene("s02", template="labelled_diagram", cues=2),
         scene("s03", template="term_card", cues=1,
               slots={"term": "write skew",
@@ -412,3 +414,64 @@ def test_scenes_with_no_template_do_not_form_a_run():
     blank = [L.SceneView(ref=f"s{i}", gagne_slot="present", narration_text=NARR,
                          visual_spec={}) for i in range(3)]
     assert L.longest_template_run(blank) == (0, "")
+
+
+# =================================== every scene must render something
+#
+# v2 rendered three cold_open scenes at 0.00% ink — 33s of a 218s video, 15% of
+# the runtime, showing nothing. Every other gate passed.
+
+def test_a_scene_that_draws_nothing_is_blocking():
+    s = scene("s01", template="cold_open", slots={"premise": "two doctors"})
+    found = L.check_renders_something(s)
+    assert found and found[0].severity == "blocking"
+    assert found[0].rule == "scene_renders_nothing"
+
+
+def test_a_shot_brief_alone_does_not_count_as_drawable():
+    """`premise` describes what the SHOT shows (week4 D2) and is never typeset,
+    so a scene holding only a premise has nothing on screen."""
+    s = scene("s01", template="cold_open", slots={"premise": "two doctors"})
+    assert L.drawable_slots(s) == []
+
+
+def test_a_headline_makes_the_scene_drawable():
+    s = scene("s01", template="cold_open",
+              slots={"premise": "two doctors", "headline": "Nobody on call"})
+    assert L.drawable_slots(s) == ["headline"]
+    assert not L.check_renders_something(s)
+
+
+def test_an_absent_asset_draws_nothing():
+    """The exact shape of the v2 blank: filled-looking slots, empty frame."""
+    s = scene("s01", template="concept_illustration",
+              slots={"subject": "two doors"})
+    assert L.drawable_slots(s) == []
+    assert L.check_renders_something(s)
+
+
+def test_a_present_asset_counts_as_drawable():
+    s = scene("s01", template="concept_illustration",
+              slots={"subject": "two doors", "asset": "a" * 64})
+    assert "asset" in L.drawable_slots(s)
+    assert not L.check_renders_something(s)
+
+
+def test_a_caption_alone_is_enough_to_draw():
+    s = scene("s01", template="concept_illustration",
+              slots={"subject": "two doors", "caption": "nobody left"})
+    assert not L.check_renders_something(s)
+
+
+def test_the_gate_runs_in_the_scene_level_pass():
+    s = scene("s01", template="cold_open", slots={"premise": "two doctors"})
+    assert "scene_renders_nothing" in rules(
+        L.scene_findings(s, has_preceding_vocab=False))
+
+
+def test_a_scene_with_no_template_is_left_to_the_other_gate():
+    """check_multimedia reports a missing visual_spec; two reports for one
+    problem helps nobody."""
+    s = L.SceneView(ref="s01", gagne_slot="present", narration_text=NARR,
+                    visual_spec={})
+    assert not L.check_renders_something(s)

@@ -723,7 +723,8 @@ def scene_findings(s: SceneView, has_preceding_vocab: bool) -> list[Finding]:
     because the two answer different questions: `video_outside_target_band` and
     `template_variety` are properties of a whole video and fire by construction
     on any single scene, so a caller checking one scene must not get them."""
-    return (check_multimedia(s) + check_caption_safe_area(s)
+    return (check_renders_something(s) + check_multimedia(s)
+            + check_caption_safe_area(s)
             + check_cue_count(s) + check_onscreen_text_share(s)
             + check_verbatim_onscreen(s) + check_object_count(s)
             + check_text_density(s) + check_new_interacting_elements(s)
@@ -752,7 +753,7 @@ def lint(scenes: list[SceneView]) -> LintReport:
 
 # ------------------------------------------------------------ persistence
 
-LINT_RULES = ("onscreen_text_share", "verbatim_narration_onscreen",
+LINT_RULES = ("scene_renders_nothing", "onscreen_text_share", "verbatim_narration_onscreen",
               "onscreen_object_count", "onscreen_text_density",
               "onscreen_text_elements", "pretraining_missing",
               "interacting_elements", "signalling_count", "unknown_template",
@@ -778,3 +779,58 @@ def save_findings(conn, video_id: str, report: LintReport,
               json.dumps(f.measured), json.dumps(f.threshold),
               json.dumps({"suggestion": f.fix}) if f.fix else None))
     return len(report.findings)
+
+
+# ------------------------------------- every scene must render something
+#
+# v2 rendered three `cold_open` scenes at 0.00% ink — 33 s of a 218 s video, 15%
+# of the runtime, showing an empty frame. Every other gate passed: the durations
+# resolved, the hashes were stable, the renders were byte-identical, the
+# captions were correct. Nothing measured whether there was anything to look at.
+#
+# This is the pre-render half of that check (the post-render half is
+# `render.ink_coverage`). It runs at storyboard time, where §9.6 says the cheap
+# checks belong, and it is BLOCKING: a scene that draws nothing is not a
+# stylistic choice, and shipping one wastes the viewer's time at the exact rate
+# of its duration.
+
+def drawable_slots(s: SceneView) -> list[str]:
+    """Filled slots this template will actually put on screen.
+
+    An `asset_ref` counts only when it is present, because an absent asset draws
+    nothing — which is precisely how `cold_open` produced a blank frame while
+    looking correctly filled.
+    """
+    try:
+        t = templates.get(s.template_name)
+    except KeyError:
+        return []
+    out: list[str] = []
+    for p in t.params:
+        value = s.slots.get(p.name)
+        if value in (None, "", [], {}):
+            continue
+        if p.type is templates.ParamType.ASSET_REF:
+            out.append(p.name)
+        elif p.on_screen:
+            out.append(p.name)
+    return out
+
+
+def check_renders_something(s: SceneView) -> list[Finding]:
+    """BLOCKING. A scene with nothing on screen must not reach a render."""
+    if not s.template_name:
+        return []
+    drawable = drawable_slots(s)
+    if drawable:
+        return []
+    return [Finding(
+        rule="scene_renders_nothing", severity="blocking", subject=s.ref,
+        message=f"'{s.template_name}' has no slot that puts anything on "
+                f"screen, so this scene renders {s.seconds}s of empty frame",
+        measured={"template": s.template_name,
+                  "filled_slots": sorted(s.slots),
+                  "drawable_slots": []},
+        threshold={"min_drawable_slots": 1},
+        fix="fill an on-screen slot, attach the asset the template expects, or "
+            "choose a template that can draw without one")]

@@ -177,10 +177,16 @@ const Body: React.FC<{
       );
 
     case "cold_open":
-      // `premise` describes the SHOT, not on-screen text (week4 D2), so it is
-      // deliberately not typeset. With no asset pipeline yet the frame is held
-      // plain rather than inventing text the storyboard did not ask for.
-      return <div />;
+      // `premise` describes the SHOT and is still not typeset (week4 D2). But
+      // returning an empty div drew a genuinely blank frame — measured 0.00%
+      // ink across three v2 scenes, 33s of runtime showing nothing. `headline`
+      // is a required slot precisely so this template always has something to
+      // draw while there is no asset pipeline.
+      return (
+        <div style={{ fontSize: big, fontWeight: 700, lineHeight: 1.15 }}>
+          {asText(slots.headline)}
+        </div>
+      );
 
     case "concept_illustration":
       return (
@@ -190,30 +196,52 @@ const Body: React.FC<{
       );
 
     case "table_build": {
+      // A real grid. Rows carry one cell per column (ParamType.ROW_LIST) and
+      // each cell sits in its own column, so the headers line up with the data
+      // under them. Previously a row was one string and the "columns" were
+      // decorative — the headers aligned with nothing at all.
       const cols = asList(slots.columns);
       const rows = asList(slots.rows);
+      const grid = `repeat(${Math.max(1, cols.length)}, 1fr)`;
       return (
-        <div style={{ fontSize: small, lineHeight: 1.5 }}>
-          <div style={{ display: "flex", gap: 32, fontWeight: 700, marginBottom: 16 }}>
+        <div style={{ fontSize: small, lineHeight: 1.45, width: "100%" }}>
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: grid,
+              gap: "0 40px",
+              fontWeight: 700,
+              paddingBottom: 14,
+              borderBottom: `3px solid ${INK}`,
+            }}
+          >
             {cols.map((c, i) => (
-              <div key={i} style={{ flex: 1 }}>{label(c)}</div>
+              <div key={i}>{label(c)}</div>
             ))}
           </div>
-          {rows.map((r, i) =>
-            revealed(i, rows.length, progress) ? (
+          {rows.map((r, i) => {
+            if (!revealed(i, rows.length, progress)) return null;
+            const cells = asList((r as Record<string, unknown>)?.cells);
+            const cued = isCued("rows", i);
+            return (
               <div
                 key={i}
                 style={{
-                  padding: "12px 0",
-                  borderTop: `2px solid ${MUTED}33`,
-                  color: isCued("rows", i) ? ACCENT : INK,
-                  fontWeight: isCued("rows", i) ? 700 : 400,
+                  display: "grid",
+                  gridTemplateColumns: grid,
+                  gap: "0 40px",
+                  padding: "16px 0",
+                  borderBottom: `2px solid ${MUTED}33`,
+                  color: cued ? ACCENT : INK,
+                  fontWeight: cued ? 700 : 400,
                 }}
               >
-                {label(r)}
+                {cells.map((c, j) => (
+                  <div key={j}>{label(c)}</div>
+                ))}
               </div>
-            ) : null,
-          )}
+            );
+          })}
         </div>
       );
     }
@@ -241,43 +269,96 @@ const Body: React.FC<{
     }
 
     case "state_timeline": {
-      const tracks = asList(slots.tracks);
+      // LANES. Each step names its track and is drawn in that track's column,
+      // at its own row, so two things advancing in parallel look parallel.
+      //
+      // The previous version drew the track names as a header strip and then a
+      // flat left-aligned list of steps underneath, with the track name as a
+      // text prefix. It animated — steps did reveal in order — but it was not a
+      // timeline: nothing sat in a lane, half the frame was empty, and the one
+      // property that made this the right template for two interleaving
+      // transactions was the property it did not show.
+      const tracks = asList(slots.tracks).map(label);
       const steps = asList(slots.steps);
+      const grid = `repeat(${Math.max(1, tracks.length)}, 1fr)`;
+      const laneOf = (step: unknown) => {
+        const t = label((step as Record<string, unknown>)?.track);
+        const i = tracks.indexOf(t);
+        return i < 0 ? 0 : i;
+      };
       return (
-        <div style={{ fontSize: small }}>
-          <div style={{ display: "flex", gap: 48, marginBottom: 32 }}>
+        <div style={{ fontSize: small, width: "100%" }}>
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: grid,
+              gap: "0 48px",
+              paddingBottom: 14,
+              borderBottom: `3px solid ${INK}`,
+            }}
+          >
             {tracks.map((t, i) => (
               <div
                 key={i}
                 style={{
-                  flex: 1,
-                  fontWeight: 700,
                   fontSize: mid,
+                  fontWeight: 700,
                   color: isCued("tracks", i) ? ACCENT : INK,
                 }}
               >
-                {label(t)}
+                {t}
               </div>
             ))}
           </div>
+
           {asText(slots.invariant) ? (
-            <div style={{ color: MUTED, marginBottom: 24 }}>
+            <div
+              style={{
+                margin: "20px 0 28px",
+                padding: "12px 20px",
+                border: `3px solid ${MUTED}`,
+                borderRadius: 10,
+                color: MUTED,
+                fontWeight: 700,
+              }}
+            >
               {asText(slots.invariant)}
             </div>
           ) : null}
-          {steps.map((s, i) =>
-            revealed(i, steps.length, progress) ? (
+
+          {steps.map((st, i) => {
+            if (!revealed(i, steps.length, progress)) return null;
+            const lane = laneOf(st);
+            const cued = isCued("steps", i);
+            return (
               <div
                 key={i}
                 style={{
-                  padding: "8px 0",
-                  color: isCued("steps", i) ? ACCENT : INK,
+                  display: "grid",
+                  gridTemplateColumns: grid,
+                  gap: "0 48px",
+                  padding: "10px 0",
                 }}
               >
-                {label(s)}
+                {tracks.map((_, col) => (
+                  <div
+                    key={col}
+                    style={{
+                      // Only the owning lane draws; the others hold the column
+                      // open so later steps stay aligned under their track.
+                      visibility: col === lane ? "visible" : "hidden",
+                      padding: "12px 18px",
+                      borderLeft: `6px solid ${cued ? ACCENT : INK}`,
+                      backgroundColor: cued ? `${ACCENT}14` : `${MUTED}14`,
+                      color: cued ? ACCENT : INK,
+                    }}
+                  >
+                    {label(st)}
+                  </div>
+                ))}
               </div>
-            ) : null,
-          )}
+            );
+          })}
         </div>
       );
     }

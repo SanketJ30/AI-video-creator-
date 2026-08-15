@@ -197,3 +197,72 @@ def test_no_asset_or_enum_parameter_needs_the_flag():
                           ParamType.INT):
                 assert p.on_screen is True, (
                     f"{t.name}.{p.name}: excluded by type already")
+
+
+# ============================= the three shapes the renderer depends on
+
+def test_a_table_row_must_carry_one_cell_per_column():
+    """Rows were TEXT_LIST, so the model packed every column into one string
+    with '|' separators, the renderer drew one full-width line, and the column
+    headers aligned with nothing."""
+    t = templates.get("table_build")
+    packed = templates.validate_params(
+        t, {"columns": ["A", "B"], "rows": ["A | B"]})
+    assert packed and "no columns" in packed[0]
+
+
+def test_a_row_with_the_wrong_cell_count_is_reported():
+    t = templates.get("table_build")
+    problems = templates.validate_params(
+        t, {"columns": ["A", "B", "C"], "rows": [{"cells": ["a", "b"]}]})
+    assert problems and "2 cell(s) but there are 3 column(s)" in problems[0]
+
+
+def test_a_well_formed_table_passes():
+    t = templates.get("table_build")
+    assert not templates.validate_params(
+        t, {"columns": ["A", "B"], "rows": [{"cells": ["a", "b"]},
+                                            {"cells": ["c", "d"]}]})
+
+
+def test_a_timeline_step_must_name_its_lane():
+    """Without a track the renderer cannot place a step, and the template stops
+    showing the parallelism it exists for."""
+    t = templates.get("state_timeline")
+    problems = templates.validate_params(
+        t, {"tracks": ["Alex", "Bo"], "steps": [{"label": "reads"}]})
+    assert problems and "no `track`" in problems[0]
+
+
+def test_a_step_on_an_unknown_track_is_reported():
+    t = templates.get("state_timeline")
+    problems = templates.validate_params(
+        t, {"tracks": ["Alex", "Bo"],
+            "steps": [{"label": "reads", "track": "Carol"}]})
+    assert problems and "not one of" in problems[0]
+
+
+def test_a_well_formed_timeline_passes():
+    t = templates.get("state_timeline")
+    assert not templates.validate_params(
+        t, {"tracks": ["Alex", "Bo"],
+            "steps": [{"label": "reads", "track": "Alex"},
+                      {"label": "reads", "track": "Bo"}]})
+
+
+def test_cold_open_requires_a_headline():
+    """It has no other on-screen slot, so without this it renders a blank
+    frame — measured at 0.00% ink across three v2 scenes."""
+    t = templates.get("cold_open")
+    assert templates.validate_params(t, {"premise": "two doctors"})
+    assert not templates.validate_params(
+        t, {"premise": "two doctors", "headline": "Nobody on call"})
+
+
+def test_every_template_has_at_least_one_on_screen_slot():
+    """A template that cannot draw anything is one the planner should not be
+    able to choose."""
+    for t in templates.TEMPLATES.values():
+        drawable = [p for p in t.params
+                    if p.on_screen or p.type is ParamType.ASSET_REF]
+        assert drawable, f"{t.name} has no slot that puts anything on screen"

@@ -75,6 +75,7 @@ class ParamType(str, Enum):
     TEXT_LIST = "text_list"
     NODE_LIST = "node_list"        # [{id, label}] — a diagram's addressable parts
     EDGE_LIST = "edge_list"        # [{from, to, label}]
+    ROW_LIST = "row_list"          # [{cells: [str, ...]}] — a table row, per column
     SERIES = "series"              # [{label, value}] — data, renderer-neutral
     STEP_LIST = "step_list"        # [{label, detail}] — ordered procedure steps
     ASSET_REF = "asset_ref"        # a content sha in media_assets (R7)
@@ -193,8 +194,15 @@ TEMPLATES: dict[str, Template] = {
             params=(
                 Param("tracks", ParamType.TEXT_LIST, max_items=4,
                       description="one label per lane; 4 is the §9.3 text-bearing cap"),
+                # Each step names the track it happens on, so it can be drawn
+                # in that lane. Without it the renderer had no way to place a
+                # step and drew a flat list under decorative headers — the one
+                # thing this template exists to show (two things advancing in
+                # parallel) was the thing it did not show.
                 Param("steps", ParamType.STEP_LIST, max_items=10,
-                      description="ordered events across the tracks"),
+                      description="ordered events; each needs `track` naming "
+                                  "which lane it belongs to, matching an entry "
+                                  "in `tracks`"),
                 Param("invariant", ParamType.TEXT, required=False,
                       description="a rule shown holding, then breaking"),
             ),
@@ -246,7 +254,14 @@ TEMPLATES: dict[str, Template] = {
             params=(
                 Param("columns", ParamType.TEXT_LIST, max_items=4,
                       description="4 is the §9.3 cap when objects carry text"),
-                Param("rows", ParamType.TEXT_LIST, max_items=8),
+                # ROW_LIST, not TEXT_LIST. As TEXT_LIST the model packed every
+                # column into one string separated by '|', the renderer drew it
+                # as one full-width line, and the column headers aligned with
+                # nothing — a table with no columns. One cell per column, and
+                # the count is checked against `columns`.
+                Param("rows", ParamType.ROW_LIST, max_items=8,
+                      description="one entry per row; `cells` must have exactly "
+                                  "one string per column, in column order"),
                 Param("highlight_row", ParamType.INT, required=False),
             ),
             min_sec=8, max_sec=90, supports_signalling=True),
@@ -306,6 +321,14 @@ TEMPLATES: dict[str, Template] = {
                 Param("premise", ParamType.TEXT, on_screen=False,
                       description="the situation, not the answer — what the "
                                   "shot SHOWS, never typeset on screen"),
+                # REQUIRED, and it is the fix for a scene that rendered a blank
+                # frame. `premise` is a brief for imagery and `asset` needs an
+                # asset pipeline that does not exist yet, so without a headline
+                # this template had nothing to draw at all: measured 0.00% ink
+                # across three scenes and 33s of the v2 runtime.
+                Param("headline", ParamType.TEXT,
+                      description="the short line held on screen under the "
+                                  "shot — ≤6 words, the situation not the answer"),
                 Param("asset", ParamType.ASSET_REF, required=False,
                       description="stock clip; absent means rendered"),
             ),
@@ -341,7 +364,7 @@ def fitting(seconds: float, *, signalling: bool | None = None) -> list[Template]
 # -------------------------------------------------------------- validation
 
 _LIST_TYPES = {ParamType.TEXT_LIST, ParamType.NODE_LIST, ParamType.EDGE_LIST,
-               ParamType.SERIES, ParamType.STEP_LIST}
+               ParamType.SERIES, ParamType.STEP_LIST, ParamType.ROW_LIST}
 
 
 def validate_params(template: Template, params: dict) -> list[str]:
@@ -373,6 +396,7 @@ def validate_params(template: Template, params: dict) -> list[str]:
                 problems.append(
                     f"{template.name}: '{p.name}' has {len(value)} items, "
                     f"more than the {p.max_items} this layout holds legibly")
+            problems += _check_list_shape(template, p, value, params)
         elif p.type is ParamType.ENUM:
             if value not in p.choices:
                 problems.append(
@@ -384,6 +408,49 @@ def validate_params(template: Template, params: dict) -> list[str]:
         elif not isinstance(value, str):
             problems.append(f"{template.name}: '{p.name}' must be a string")
 
+    return problems
+
+
+def _check_list_shape(template: "Template", p: Param, value: list,
+                      params: dict) -> list[str]:
+    """Structure the renderer depends on, checked before anything renders.
+
+    A cell count that disagrees with the column count draws a table whose
+    headers line up with nothing, and a step naming a track that does not exist
+    has no lane to be drawn in. Both used to render "successfully".
+    """
+    problems: list[str] = []
+
+    if p.type is ParamType.ROW_LIST:
+        n_cols = len(params.get("columns") or [])
+        for i, row in enumerate(value):
+            cells = (row or {}).get("cells") if isinstance(row, dict) else None
+            if not isinstance(cells, list) or not all(
+                    isinstance(c, str) for c in cells):
+                problems.append(
+                    f"{template.name}: rows[{i}] needs a `cells` list of "
+                    f"strings, one per column. A row packed into one string is "
+                    f"a table with no columns.")
+                continue
+            if n_cols and len(cells) != n_cols:
+                problems.append(
+                    f"{template.name}: rows[{i}] has {len(cells)} cell(s) but "
+                    f"there are {n_cols} column(s); every row must fill every "
+                    f"column, in column order")
+
+    if p.type is ParamType.STEP_LIST and "tracks" in template.param_names():
+        tracks = [t for t in (params.get("tracks") or []) if isinstance(t, str)]
+        for i, step in enumerate(value):
+            track = (step or {}).get("track") if isinstance(step, dict) else None
+            if not track:
+                problems.append(
+                    f"{template.name}: steps[{i}] has no `track`; without one "
+                    f"it cannot be placed in a lane and the template stops "
+                    f"showing the parallelism it exists for")
+            elif tracks and track not in tracks:
+                problems.append(
+                    f"{template.name}: steps[{i}] is on track {track!r}, which "
+                    f"is not one of {tracks}")
     return problems
 
 
