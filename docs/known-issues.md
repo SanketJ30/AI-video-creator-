@@ -625,3 +625,149 @@ silence. **Add a signal check at every boundary where a stream can be dropped**,
 not only a structural one — and note that this is the same shape as ISSUE-8,
 where the prose was fluent and the claim was false. Both are cases of a check
 that measures form passing something wrong in substance.
+
+---
+
+## ISSUE-13 — §9.2 signalling is absent from two thirds of the video, and the signal designer is not at fault · OPEN
+
+**Question asked: did the signal designer produce cues the renderer then dropped,
+or never produce them? Answer: never produced, and the renderer dropped
+nothing.**
+
+Measured on v2 as stored, before any render:
+
+| scene | template | `supports_signalling` | cues |
+|---|---|---|---:|
+| s01 | cold_open | **False** | 0 |
+| s02 | title_card | **False** | 0 |
+| s03 | key_phrase | **False** | 0 |
+| s04 | state_timeline | True | 3 |
+| s05 | table_build | True | 3 |
+| s06 | cold_open | **False** | 0 |
+| s07 | table_build | True | 3 |
+| s08 | cold_open | **False** | 0 |
+| s09 | key_phrase | **False** | 0 |
+
+Every signalling-capable scene carries the maximum §9.2 allows (3). Every scene
+with zero is on a template that declares it cannot host a cue. Stored cue count
+and rendered cue count agree exactly: 9 and 9.
+
+**So this is not a cue-generation bug and not a renderer bug. It is a template
+SELECTION consequence**, and the flag it depends on is mine, not the spec's —
+that is ISSUE-5, where §9.2 says *"every scene contains 1–3 signalling events,
+never zero"* without exceptions and `templates.py` exempts five templates.
+
+The visual planner chose non-signalling templates for 6 of 9 scenes, so §9.2's
+signalling rule is satisfied on 3 scenes and silently inapplicable on 6. The
+linter reports nothing, because the exemption is encoded in the registry.
+
+**Three ways out, and it is the same spec question as ISSUE-5:**
+
+1. Every template must host signalling — flip the five flags, let the designer
+   find a referent. §9.2 read literally.
+2. Keep the exemption but make the PLANNER account for it: a video where most
+   scenes cannot host a cue is a planning problem, so add a video-level finding
+   on the share of non-signalling scenes.
+3. Accept it and amend §9.2 to say which treatments are exempt.
+
+**Not decided here.** Option 2 is the cheapest thing that makes the absence
+visible rather than silent, and it needs a threshold v0.2 does not give.
+
+---
+
+## ISSUE-14 — 11 seconds of dead air at the end of the video's central scene · OPEN
+
+s04 is the 90 s `present` scene carrying the whole explanation. Its narration is
+79.09 s. The remaining **10.91 s is silence**.
+
+**Measured placement (per-second RMS over the finished MP4, s04's 90 s window):**
+
+```
+###############################################################################...........
+|<------------------ 79 s of speech ------------------>|<-- 11 s silence -->|
+
+leading silence  : 0 s
+trailing silence : 11 s
+interior silence : 0 s
+```
+
+**All of it is trailing, contiguous, and at the end.** Not distributed pacing
+beats — one unbroken block of nothing after the last word, before the cut to
+s05.
+
+**Why it is there.** s04 is the only `rigid` scene in the video. §15.3 says a
+rigid scene keeps its authored duration and the audio is fitted into it, and
+`resolver.resolve_scene` pads with silence to reach the target; `mux_scene`
+appends that padding after the audio. The padding is 12.1% of the scene, inside
+§15.3's ~15% budget, so no `FitProblem` was raised. **The resolver behaved
+exactly as specified and the result is still bad.**
+
+**Why the spec's budget does not catch it.** §15.3's 15% figure is about
+absorbing *contraction* — a locale whose translation runs short — where the
+padding is distributed by the timing model. Applying the same number to a
+single trailing block treats "15% of the scene is silence somewhere" and "the
+last 11 seconds are silent" as the same thing. They are not.
+
+**Three options, none taken yet:**
+
+1. **Distribute the padding** at span boundaries rather than appending it, so a
+   rigid scene breathes between steps instead of dying at the end. Needs a rule
+   for where beats go — §9.3's settling beat (≥1.5 s after each new concept) is
+   the obvious candidate and is already in `DEFERRED_RULES`.
+2. **Cap trailing silence** specifically, separately from the total pad budget.
+   Needs a number v0.2 does not give.
+3. **Make s04 elastic** and let the visual own a shorter duration. Cheapest, but
+   s04 is `rigid` because the timeline animation has its own tempo, which is the
+   legitimate reason for the flag.
+
+Recommendation is 1, because it is the only one that improves the scene rather
+than shortening it, and §9.3 already wants settling beats. It needs the timing
+work that is currently deferred to a later week.
+
+---
+
+## ISSUE-15 — `concept_illustration` renders 0.43% ink: a caption alone in an empty frame · OPEN
+
+**Found by the ink-coverage metric on its first run**, on scenes that pass the
+blocking `scene_renders_nothing` gate. Both checks are correct; they measure
+different things, which is why both exist.
+
+Ink coverage across all nine v2 scenes after the blank-scene fix:
+
+| scene | template | ink (min across scene) |
+|---|---|---:|
+| s01 | cold_open | 0.97% |
+| s02 | title_card | 1.46% |
+| s03 | key_phrase | 1.46% |
+| s04 | state_timeline | 1.66% → 2.70% |
+| s05 | table_build | 1.42% → 3.31% |
+| **s06** | **concept_illustration** | **0.43%** ← under the floor |
+| s07 | table_build | 1.22% → 2.51% |
+| **s08** | **concept_illustration** | **0.43%** ← under the floor |
+| s09 | key_phrase | 1.76% |
+
+`concept_illustration` is `{subject, asset, caption}`. `subject` is a brief for
+the artwork and is never typeset (week-4 D2), `asset` needs an asset pipeline
+that does not exist, so the only thing drawn is `caption` — one short line in a
+1920×1080 frame.
+
+**The structural gate passes it and is right to**: a caption *is* a filled
+on-screen slot, so the scene is not empty. **The ink metric fails it and is also
+right**: 0.43% of the frame has anything on it. A gate that measures whether a
+slot is filled cannot tell you whether the result is worth looking at.
+
+**Same root cause as the cold_open blank (fixed): a template whose primary
+content is an asset, used in a pipeline with no assets.** Three of eleven
+templates are in that position — `cold_open`, `concept_illustration`,
+`ui_walkthrough`.
+
+**Not fixed, and the threshold was NOT tuned to make it pass.** 0.005 was set
+before this measurement, as a blank-catcher; moving it to 0.004 to quiet two
+scenes would be exactly the wrong response. Options are the same shape as
+ISSUE-13's: either the planner should not choose asset-dependent templates while
+there is no asset pipeline, or those templates need a text-bearing fallback the
+way `cold_open` now has `headline`.
+
+**Also worth stating plainly: the whole corpus is sparse.** The best scene in the
+video reaches 3.31% ink. Nothing here is dense enough to look designed, and the
+ink profile is the first number that says so.
