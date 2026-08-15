@@ -850,3 +850,46 @@ the renderer's own source into the key, and the eight templates whose rendering
 semantics changed are bumped to 1.1.0. Without this, every scene rendered before
 a renderer change would be served stale forever, and the only symptom would be a
 video that quietly did not match its own templates.
+
+
+---
+
+## ISSUE-16 — a fix can be correct, in the closure, and still not run · FIXED
+
+Two incidents in one session, same shape, and it is worth naming because the
+second happened **after** the first was supposedly the lesson learned.
+
+**Incident 1 (ISSUE-12).** The silent-video fix added `-map 0:v:0 -map 1:a:0`.
+`stream_map` went into the closure, so it worked.
+
+**Incident 2 (ISSUE-14).** The pad-plan fix computed the redistribution
+correctly, put `pad_plan` in the closure, and the gap-insertion code **never
+landed in the function** — a `str.replace()` patch whose anchor did not match,
+which failed silently. The resolver reported `trailing 3.60s (4.0%)` and the
+finished video still had 11.0 s of dead air. Every number in the report was
+right about a plan nothing executed.
+
+Then, after the code was applied properly, the re-render served the muxes
+**from cache**: `pad_plan` was in the closure and unchanged between the two
+runs, so the hash was identical and the old, wrong bytes came back.
+
+**So the closure described what went IN and not what was DONE with it.** Fixed
+with `mux_code_version()` — a hash of `mux_scene`'s own source, in the closure.
+It moves when the behaviour moves, with nobody having to remember to bump a
+constant. `render.render_source_version()` is the same fix one layer up.
+
+**Measured on s04 after the fix actually ran:**
+
+| | before | after |
+|---|---:|---:|
+| trailing silence | 11.00 s | **3.75 s** |
+| interior beats | 0 | **6.25 s across 25 bins** |
+| total silence | 11.00 s | 10.00 s |
+
+### The rule this leaves behind
+
+**Verify a fix against the artifact, not against the plan that describes it.**
+Both incidents printed correct numbers while the video was unchanged. The only
+thing that caught either was decoding the finished file and measuring it — which
+is also how the column bug was found, by looking at a frame rather than reading
+a report.

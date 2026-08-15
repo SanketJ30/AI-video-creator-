@@ -212,3 +212,52 @@ def test_audible_audio_passes_the_check(tmp_path):
          "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000",
          "-t", "1", "-c:a", "pcm_s16le", str(tone)], check=True)
     assembly._assert_audible(tone)          # must not raise
+
+
+# ------------------------------- ISSUE-14: the beats must reach the audio
+
+def test_the_pad_plan_actually_reaches_the_muxed_audio():
+    """Regression for a silent no-op: the plan was computed correctly, hashed
+    into the closure, and then IGNORED, because the patch that inserted the
+    gaps never landed in mux_scene. The resolver's numbers were right and the
+    finished video still had 11 contiguous seconds of silence at the end.
+
+    Asserts the actual gap-insertion code is present and reachable."""
+    import inspect
+    src = inspect.getsource(assembly.mux_scene)
+    assert "span_samples" in src and "gaps[i]" in src, (
+        "mux_scene does not insert the pad plan's gaps")
+    assert src.index("gaps") < src.index("audio_samples_target - have"), (
+        "gaps must be inserted BEFORE the trailing pad is computed, or the "
+        "trailing block absorbs everything again")
+
+
+def test_gap_insertion_places_silence_between_spans():
+    """The property the video is supposed to have: silence on sentence
+    boundaries, not one block at the end."""
+    import array
+    pcm = b"\x11\x11" * 48000 * 3
+    span_samples = [48000, 48000, 48000]
+    gaps = [24000, 24000]
+    parts, cursor = [], 0
+    for i, n in enumerate(span_samples):
+        parts.append(pcm[cursor * 2:(cursor + n) * 2])
+        cursor += n
+        if i < len(gaps) and gaps[i]:
+            parts.append(b"\x00" * (gaps[i] * 2))
+    parts.append(pcm[cursor * 2:])
+    a = array.array("h")
+    a.frombytes(b"".join(parts))
+
+    runs, cur, n = [], None, 0
+    for x in a:
+        z = x == 0
+        if z != cur:
+            if cur is not None:
+                runs.append((cur, n))
+            cur, n = z, 1
+        else:
+            n += 1
+    runs.append((cur, n))
+    assert [n for z, n in runs if z] == [24000, 24000]
+    assert len(a) == 3 * 48000 + sum(gaps)

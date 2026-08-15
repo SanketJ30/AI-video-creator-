@@ -52,10 +52,12 @@ and therefore do not drive captions.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import subprocess
 import tempfile
 from dataclasses import dataclass, field
+from functools import lru_cache
 from pathlib import Path
 
 from . import hashing, rtime
@@ -139,6 +141,21 @@ def default_transitions(n_scenes: int) -> list[Transition]:
 
 # -------------------------------------------------------------------- mux
 
+@lru_cache(maxsize=1)
+def mux_code_version() -> str:
+    """Content hash of the muxing code itself.
+
+    §11.3 puts codec and renderer versions in the cache key because they change
+    bytes. The code that assembles those bytes is the same class of input, and
+    leaving it out produced two stale-cache incidents in one week — see the
+    comment at the call site. Precise by construction: it moves when this
+    function moves and at no other time.
+    """
+    import inspect
+    return hashlib.sha256(
+        inspect.getsource(mux_scene).encode("utf-8")).hexdigest()[:16]
+
+
 def mux_scene(video_hash: str, audio_hash: str, frames: int,
               audio_samples_target: int, pad_plan=None,
               span_samples: list[int] | None = None) -> str:
@@ -156,7 +173,16 @@ def mux_scene(video_hash: str, audio_hash: str, frames: int,
                 # In the closure because it changes which audio ends up in the
                 # file. Without it, muxes made before the explicit -map was
                 # added would be served from cache and stay silent.
-                "stream_map": "0:v:0+1:a:0"},
+                "stream_map": "0:v:0+1:a:0",
+                # THE CODE, not just its inputs. Twice now a fix to this
+                # function has been served stale from cache because the closure
+                # described what went in and not what was done with it: the
+                # silent-video fix (ISSUE-12) and then the pad-plan fix
+                # (ISSUE-14), where the plan was in the closure, correct, and
+                # ignored by a body that had not changed. A hash of the
+                # function's own source moves whenever the behaviour does, with
+                # nobody having to remember to bump a constant.
+                "mux_code": mux_code_version()},
         extra={"frames": int(frames), "samples": int(audio_samples_target),
                # In the closure: the same audio padded differently is a
                # different scene, and serving one for the other would put the
@@ -168,6 +194,22 @@ def mux_scene(video_hash: str, audio_hash: str, frames: int,
 
     pcm = read_pcm(audio_hash)
     have = len(pcm) // 2
+
+    gaps = list(getattr(pad_plan, "gaps", []) or [])
+    if gaps and span_samples and len(span_samples) == len(gaps) + 1:
+        # ISSUE-14: insert the beats BETWEEN spans rather than appending the
+        # whole pad after the last word. The span lengths come from the
+        # alignment, so every gap lands exactly on a sentence boundary.
+        parts, cursor = [], 0
+        for i, n in enumerate(span_samples):
+            parts.append(pcm[cursor * 2:(cursor + n) * 2])
+            cursor += n
+            if i < len(gaps) and gaps[i]:
+                parts.append(b"\x00" * (gaps[i] * 2))
+        parts.append(pcm[cursor * 2:])
+        pcm = b"".join(parts)
+        have = len(pcm) // 2
+
     if have < audio_samples_target:
         pcm = pcm + b"\x00" * ((audio_samples_target - have) * 2)
     elif have > audio_samples_target:
