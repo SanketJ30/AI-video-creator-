@@ -1,5 +1,6 @@
 import React from "react";
 import { AbsoluteFill, useCurrentFrame, useVideoConfig } from "remotion";
+import { color, font } from "./tokens";
 
 /**
  * THE R8 BOUNDARY.
@@ -54,10 +55,6 @@ export const sceneSchemaDefaults: SceneProps = {
   durationInFrames: 90,
 };
 
-const INK = "#12151c";
-const PAPER = "#f7f7f4";
-const ACCENT = "#c8442b";
-const MUTED = "#6b7280";
 
 /** §9.2 signalling, resolved: is this cue active at this frame? */
 const cueActive = (cue: Cue, seconds: number) =>
@@ -106,11 +103,11 @@ export const Scene: React.FC<SceneProps> = ({
   return (
     <AbsoluteFill
       style={{
-        backgroundColor: PAPER,
-        color: INK,
+        backgroundColor: color.surface,
+        color: color.ink,
         // §11.3: system fonts only. A webfont is a network fetch at render time
         // and a font-loading race; both are named hermeticity failures.
-        fontFamily: "Segoe UI, Helvetica, Arial, sans-serif",
+        fontFamily: font.sans,
         padding: 96,
         paddingBottom: safeBottomPx + 48,
         display: "flex",
@@ -142,7 +139,7 @@ export const Scene: React.FC<SceneProps> = ({
 const cued = (on: boolean): React.CSSProperties =>
   on
     ? {
-        color: ACCENT,
+        color: color.signal,
         // Kept subtle: a highlight directs attention, it does not redesign the
         // frame mid-scene. §9.2's scale_pulse bounds live in signal_designer.
         textDecorationColor: ACCENT,
@@ -181,7 +178,7 @@ const Body: React.FC<{
               style={{
                 fontSize: mid,
                 marginTop: 28,
-                color: MUTED,
+                color: color.inkMuted,
                 ...cued(isCued("emphasis", 0)),
               }}
             >
@@ -205,7 +202,7 @@ const Body: React.FC<{
           {asText(slots.subtitle) ? (
             <div
               style={{
-                fontSize: mid, color: MUTED, marginTop: 24,
+                fontSize: mid, color: color.inkMuted, marginTop: 24,
                 ...cued(isCued("subtitle", 0)),
               }}
             >
@@ -222,7 +219,7 @@ const Body: React.FC<{
                         ...cued(isCued("term", 0)) }}>
             {asText(slots.term)}
           </div>
-          <div style={{ fontSize: mid, color: MUTED, marginTop: 24,
+          <div style={{ fontSize: mid, color: color.inkMuted, marginTop: 24,
                         ...cued(isCued("characteristic", 0)) }}>
             {asText(slots.characteristic)}
           </div>
@@ -244,7 +241,7 @@ const Body: React.FC<{
 
     case "concept_illustration":
       return (
-        <div style={{ fontSize: mid, color: MUTED,
+        <div style={{ fontSize: mid, color: color.inkMuted,
                       ...cued(isCued("caption", 0)) }}>
           {asText(slots.caption)}
         </div>
@@ -267,7 +264,7 @@ const Body: React.FC<{
               gap: "0 40px",
               fontWeight: 700,
               paddingBottom: 14,
-              borderBottom: `3px solid ${INK}`,
+              borderBottom: `3px solid ${color.structure}`,
             }}
           >
             {cols.map((c, i) => (
@@ -286,8 +283,8 @@ const Body: React.FC<{
                   gridTemplateColumns: grid,
                   gap: "0 40px",
                   padding: "16px 0",
-                  borderBottom: `2px solid ${MUTED}33`,
-                  color: cued ? ACCENT : INK,
+                  borderBottom: `1px solid ${color.structureSubtle}`,
+                  color: cued ? color.signal : color.ink,
                   fontWeight: cued ? 700 : 400,
                 }}
               >
@@ -306,15 +303,15 @@ const Body: React.FC<{
       return (
         <div
           style={{
-            fontFamily: "Consolas, Menlo, monospace",
+            fontFamily: font.mono,
             fontSize: small,
             lineHeight: 1.6,
           }}
         >
           {steps.map((s, i) =>
             revealed(i, steps.length, progress) ? (
-              <div key={i} style={{ color: isCued("steps", i) ? ACCENT : INK }}>
-                <span style={{ color: MUTED }}>$ </span>
+              <div key={i} style={{ color: isCued("steps", i) ? color.signal : color.ink }}>
+                <span style={{ color: color.inkMuted }}>$ </span>
                 {label(s)}
               </div>
             ) : null,
@@ -349,7 +346,7 @@ const Body: React.FC<{
               gridTemplateColumns: grid,
               gap: "0 48px",
               paddingBottom: 14,
-              borderBottom: `3px solid ${INK}`,
+              borderBottom: `3px solid ${color.structure}`,
             }}
           >
             {tracks.map((t, i) => (
@@ -358,7 +355,7 @@ const Body: React.FC<{
                 style={{
                   fontSize: mid,
                   fontWeight: 700,
-                  color: isCued("tracks", i) ? ACCENT : INK,
+                  color: isCued("tracks", i) ? color.signal : color.ink,
                 }}
               >
                 {t}
@@ -371,9 +368,9 @@ const Body: React.FC<{
               style={{
                 margin: "20px 0 28px",
                 padding: "12px 20px",
-                border: `3px solid ${MUTED}`,
+                border: `1px solid ${color.signalBorder}`,
                 borderRadius: 10,
-                color: MUTED,
+                color: color.inkMuted,
                 fontWeight: 700,
               }}
             >
@@ -403,9 +400,9 @@ const Body: React.FC<{
                       // open so later steps stay aligned under their track.
                       visibility: col === lane ? "visible" : "hidden",
                       padding: "12px 18px",
-                      borderLeft: `6px solid ${cued ? ACCENT : INK}`,
-                      backgroundColor: cued ? `${ACCENT}14` : `${MUTED}14`,
-                      color: cued ? ACCENT : INK,
+                      borderLeft: `6px solid ${cued ? color.signal : color.ink}`,
+                      backgroundColor: cued ? color.surfaceSignal : color.surfaceSubtle,
+                      color: cued ? color.signal : color.ink,
                     }}
                   >
                     {label(st)}
@@ -439,9 +436,9 @@ const Body: React.FC<{
                   style={{
                     fontSize: mid,
                     padding: "24px 32px",
-                    border: `4px solid ${isCued("nodes", i, id) ? ACCENT : INK}`,
+                    border: `4px solid ${isCued("nodes", i, id) ? color.signal : color.ink}`,
                     borderRadius: 12,
-                    color: isCued("nodes", i, id) ? ACCENT : INK,
+                    color: isCued("nodes", i, id) ? color.signal : color.ink,
                   }}
                 >
                   {label(n)}
@@ -493,7 +490,7 @@ const Body: React.FC<{
       // An unknown template must be loud, not blank: a silently empty scene is
       // one nobody notices until the whole video is assembled.
       return (
-        <div style={{ fontSize: mid, color: ACCENT, fontWeight: 700 }}>
+        <div style={{ fontSize: mid, color: color.signal, fontWeight: 700 }}>
           UNKNOWN TEMPLATE: {template}
         </div>
       );

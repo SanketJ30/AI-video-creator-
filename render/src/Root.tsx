@@ -1,6 +1,7 @@
 import React from "react";
 import { Composition } from "remotion";
 import { Scene, sceneSchemaDefaults } from "./Scene";
+import { ensureFontsLoaded } from "./fonts";
 
 // One composition, parameterised by props. A composition per template would put
 // the template list in two places (here and templates.py) and they would drift.
@@ -14,6 +15,9 @@ import { Scene, sceneSchemaDefaults } from "./Scene";
 // whole frames; a default here would be a second opinion about duration, and
 // two sources of truth about time is exactly what R1 exists to prevent.
 export const RemotionRoot: React.FC = () => {
+  // §11.3: pin the webfont before any frame paints, or frame 0 renders in the
+  // fallback family and the scene is no longer reproducible.
+  ensureFontsLoaded();
   return (
     <Composition
       id="scene"

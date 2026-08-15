@@ -291,9 +291,11 @@ def frame_digest(hash_: str, frame: int = 0) -> str:
 # above it, and the fact that this corpus tops out at 4% is itself reportable.
 AUTHORED_MIN_INK_COVERAGE = 0.005
 
-# The Scene.tsx background. Kept here rather than imported because the renderer
-# owns its palette until Phase 5 binds a brand (week-4 D6).
-BACKGROUND_RGB = (247, 247, 244)
+# tokens.color.surface. Kept here rather than imported across the language
+# boundary; the hex-literal test allows this one because it is a measurement
+# parameter, not a style.
+# tokens.color.surface (#FFFFFF) — §4's default frame.
+BACKGROUND_RGB = (255, 255, 255)
 
 
 def ink_coverage(hash_: str, frame: int = 0, tolerance: int = 12,
