@@ -215,7 +215,7 @@ class Template:
 TEMPLATES: dict[str, Template] = {
     t.name: t for t in [
         Template(
-            name="labelled_diagram", version="1.0.0", kind=Kind.ANIMATED_DIAGRAM,
+            name="labelled_diagram", version="1.1.0", kind=Kind.ANIMATED_DIAGRAM,
             description="Nodes and edges that build up, with one focus target. "
                         "The default for structure, flow and relationships (§4.4).",
             params=(
@@ -230,7 +230,7 @@ TEMPLATES: dict[str, Template] = {
             min_sec=8, max_sec=120),
 
         Template(
-            name="state_timeline", version="1.1.0", kind=Kind.ANIMATED_DIAGRAM,
+            name="state_timeline", version="1.2.0", kind=Kind.ANIMATED_DIAGRAM,
             description="Parallel tracks advancing through time — two sessions, "
                         "two threads, a before/after. The one template where the "
                         "referent genuinely changes over time (§8).",
@@ -252,7 +252,7 @@ TEMPLATES: dict[str, Template] = {
             min_sec=15, max_sec=120),
 
         Template(
-            name="key_phrase", version="1.1.0", kind=Kind.KINETIC_TYPE,
+            name="key_phrase", version="1.2.0", kind=Kind.KINETIC_TYPE,
             description="One phrase, typeset large. §9.4's abridged near-paraphrase "
                         "lives here — never a full narration sentence.",
             preconditions=(
@@ -275,7 +275,7 @@ TEMPLATES: dict[str, Template] = {
             min_sec=3, max_sec=20),
 
         Template(
-            name="term_card", version="1.1.0", kind=Kind.KINETIC_TYPE,
+            name="term_card", version="1.2.0", kind=Kind.KINETIC_TYPE,
             description="A term, its one-line characteristic, and an icon. §9.2's "
                         "pre-training rule emits this when a scene introduces ≥3 "
                         "new terms.",
@@ -288,7 +288,7 @@ TEMPLATES: dict[str, Template] = {
             min_sec=4, max_sec=15),
 
         Template(
-            name="series_build", version="1.1.0", kind=Kind.DATA_VIZ,
+            name="series_build", version="1.2.0", kind=Kind.DATA_VIZ,
             description="A chart that builds. §4.4's 'data coming to life'.",
             params=(
                 Param("title", ParamType.TEXT, required=False),
@@ -302,7 +302,7 @@ TEMPLATES: dict[str, Template] = {
             min_sec=8, max_sec=90),
 
         Template(
-            name="table_build", version="1.1.0", kind=Kind.DATA_VIZ,
+            name="table_build", version="1.2.0", kind=Kind.DATA_VIZ,
             description="Rows revealed in order. Comparison where the cells are "
                         "the content.",
             params=(
@@ -321,7 +321,7 @@ TEMPLATES: dict[str, Template] = {
             min_sec=8, max_sec=90),
 
         Template(
-            name="terminal_replay", version="1.0.0", kind=Kind.SCREEN_DEMO,
+            name="terminal_replay", version="1.1.0", kind=Kind.SCREEN_DEMO,
             description="Commands and output appearing in sequence. §14.1's "
                         "procedural category — the one Colossyan cannot serve.",
             params=(
@@ -332,7 +332,7 @@ TEMPLATES: dict[str, Template] = {
             min_sec=10, max_sec=120),
 
         Template(
-            name="ui_walkthrough", version="1.0.0", kind=Kind.SCREEN_DEMO,
+            name="ui_walkthrough", version="1.1.0", kind=Kind.SCREEN_DEMO,
             description="A synthetic interface with a pointer moving through it.",
             params=(
                 Param("surface", ParamType.ASSET_REF, required=False,
@@ -342,7 +342,7 @@ TEMPLATES: dict[str, Template] = {
             min_sec=10, max_sec=120),
 
         Template(
-            name="concept_illustration", version="1.1.0", kind=Kind.ILLUSTRATION,
+            name="concept_illustration", version="1.2.0", kind=Kind.ILLUSTRATION,
             description="A drawn metaphor for an abstract idea. §4.4 ranks this "
                         "below a rendered diagram — reach for it when there is "
                         "nothing structural to draw.",
@@ -350,24 +350,38 @@ TEMPLATES: dict[str, Template] = {
                 Param("subject", ParamType.TEXT, on_screen=False,
                       description="what the illustration DEPICTS — a brief for "
                                   "the artwork, never typeset on screen"),
-                Param("asset", ParamType.ASSET_REF, required=False),
+                # §0's executive decision closes ISSUE-15: for Milestone A this
+                # template is typographic and diagrammatic, so it draws a flow
+                # of cards and connectors rather than waiting for stock. The
+                # asset slot stays architecturally optional so Storyblocks or
+                # Freepik can arrive later without redesigning the template.
+                Param("steps", ParamType.TEXT_LIST, required=False, max_items=5,
+                      description="§9.6: the concept as a vertical flow of "
+                                  "labelled blocks, e.g. RAW DATA → FEATURES → "
+                                  "MODEL. 3-5 blocks."),
+                Param("asset", ParamType.ASSET_REF, required=False,
+                      description="optional and future-facing (§0)"),
                 Param("caption", ParamType.TEXT, required=False,
-                      description="the only text a viewer reads on this template"),
+                      description="heading above the flow, or the single line "
+                                  "when there is no flow"),
             ),
             min_sec=4, max_sec=45),
 
         Template(
-            name="title_card", version="1.1.0", kind=Kind.TITLE_HOOK,
+            name="title_card", version="1.2.0", kind=Kind.TITLE_HOOK,
             description="The objective slot's line, typeset. §9.1 reuses the "
                         "objective verbatim as the scene title.",
             params=(
                 Param("title", ParamType.TEXT),
                 Param("subtitle", ParamType.TEXT, required=False),
+                Param("module_label", ParamType.TEXT, required=False,
+                      description="§9.2: optional lesson/module label above "
+                                  "the title"),
             ),
             min_sec=3, max_sec=15),
 
         Template(
-            name="cold_open", version="1.1.0", kind=Kind.TITLE_HOOK,
+            name="cold_open", version="1.2.0", kind=Kind.TITLE_HOOK,
             description="A concrete situation before any explanation. §4.4 puts "
                         "stock here specifically: 'a hook at the open, or a "
                         "real-world shot that grounds the problem'.",
@@ -381,8 +395,14 @@ TEMPLATES: dict[str, Template] = {
                 # this template had nothing to draw at all: measured 0.00% ink
                 # across three scenes and 33s of the v2 runtime.
                 Param("headline", ParamType.TEXT,
-                      description="the short line held on screen under the "
-                                  "shot — ≤6 words, the situation not the answer"),
+                      description="the question or paradox the lesson resolves, "
+                                  "held large on screen — design §9.1"),
+                Param("module_label", ParamType.TEXT, required=False,
+                      description="§9.1: small label above the question, e.g. "
+                                  "'MODULE 03 · MODEL EVALUATION'"),
+                Param("premise_line", ParamType.TEXT, required=False,
+                      description="§9.1: one supporting line under the "
+                                  "question, appearing after it is readable"),
                 Param("asset", ParamType.ASSET_REF, required=False,
                       description="stock clip; absent means rendered"),
             ),

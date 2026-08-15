@@ -133,11 +133,13 @@ AUTHORED_FIT_TOLERANCE = 0.15
 # stated here and in the renderer, and the two must move together. A test
 # asserts every registered template has an entry and every role exists.
 SLOT_ROLES: dict[str, dict[str, str]] = {
-    "cold_open": {"headline": "display"},
-    "title_card": {"title": "h1", "subtitle": "body"},
+    "cold_open": {"headline": "display", "module_label": "label",
+                  "premise_line": "body"},
+    "title_card": {"title": "h1", "subtitle": "body",
+                   "module_label": "label"},
     "key_phrase": {"phrase": "display", "emphasis": "body"},
     "term_card": {"term": "h1", "characteristic": "body"},
-    "concept_illustration": {"caption": "h2"},
+    "concept_illustration": {"caption": "h2", "steps": "h3"},
     "labelled_diagram": {"title": "h2", "nodes": "h3", "edges": "caption"},
     "state_timeline": {"tracks": "label", "steps": "body",
                        "invariant": "bodyStrong"},

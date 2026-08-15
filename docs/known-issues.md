@@ -1049,3 +1049,38 @@ That is Phase 4's job and it is now a requirement rather than a nice-to-have —
 recorded as **E3** in `docs/editor-constraints.md`. Until it exists, every
 challenger finding below "regenerate the whole video" is unactionable, which
 caps how useful the challenger can be no matter how good its verdicts are.
+
+---
+
+## ISSUE-20 — the registry holds eleven templates; the design system designs six · OPEN
+
+`docs/design/video-design-system.md` §9 specifies six templates: `cold_open`,
+`title_card`, `key_phrase`, `state_timeline`, `table_build`,
+`concept_illustration`. §0 calls them "the six renderer templates" and asks that
+they behave "like a motion version of the existing course presentation system,
+not like six unrelated motion-graphics templates".
+
+`templates.py` holds **eleven**. The five with no design section are
+`labelled_diagram`, `term_card`, `series_build`, `terminal_replay`,
+`ui_walkthrough`.
+
+They render from the token layer — correct colours, correct type scale, correct
+spacing, inside the §4 content region — so they are legible and consistent. What
+they do not have is a *designed layout*: no specified composition, no motion
+sequence, no lane or cell language of their own.
+
+**Not resolved by inventing layouts for them.** A seventh, eighth and ninth
+composition language authored here is exactly the outcome §0 warns against, and
+it would be authored by someone with no access to the presentation deck the
+design system is derived from.
+
+**Two ways out, both for a human:**
+
+1. **Design the five**, if they earn their place. `labelled_diagram` and
+   `terminal_replay` are the two the MVCC course actually reaches for.
+2. **Retire them**, and let the planner choose among six. §4.4's composition
+   priority already prefers rendered diagrams; a smaller registry with real
+   designs beats a larger one where five are improvised.
+
+Until then the planner may still select them, and any scene that does gets a
+legible frame with no design behind it.

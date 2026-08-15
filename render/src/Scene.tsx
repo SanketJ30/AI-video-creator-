@@ -1,34 +1,37 @@
 import React from "react";
 import { AbsoluteFill, useCurrentFrame, useVideoConfig } from "remotion";
 import {
-  canvas, color, columns, contentHeight, contentLeft, contentTop,
-  contentWidth, font, space, type as typeScale,
+  canvas, color, columns, contentHeight, contentLeft, contentTop, contentWidth,
+  font, space, type as typeScale,
 } from "./tokens";
 
 /**
- * THE R8 BOUNDARY.
+ * THE R8 BOUNDARY, and the design system's only implementation.
  *
  * CHALLENGES R8: the scene graph is renderer-agnostic. `templates.py` describes
  * a template as a name, typed parameters and a duration band — no React, no JSX,
  * no component names, no CSS. This file is the ONLY place that turns that
  * description into pixels, and the only place that knows Remotion exists.
  *
- * Everything upstream of here — the planner, the signal designer, the linter,
- * the resolver, the manifest — deals in `{template, slots, cues}`. If a second
- * engine is ever justified (§11.5 keeps the escape hatch real) this file is what
- * gets rewritten, not the pipeline.
+ * Layouts follow `docs/design/video-design-system.md` §9, section by section.
+ * Colour, size, space and motion come from `tokens.ts` (§3–§6, §10–§11); there
+ * are no literals here and a test enforces that.
+ *
+ * ## Which templates §9 actually designs
+ *
+ * §9 designs SIX: cold_open, title_card, key_phrase, state_timeline,
+ * table_build, concept_illustration. The registry holds ELEVEN. The other five
+ * — labelled_diagram, term_card, series_build, terminal_replay, ui_walkthrough —
+ * are rendered here from the token layer so they remain usable and legible, but
+ * they have no design section. That gap is recorded as ISSUE-20 rather than
+ * papered over: inventing a seventh layout language here is exactly the "six
+ * unrelated motion-graphics templates" outcome §0 warns against.
  *
  * ## Hermeticity (§11.3)
  *
- * No Date.now(), no Math.random(), no network fetches, no remote fonts. Motion
- * is a pure function of `frame`, which is what makes a Remotion composition
- * cacheable in the first place. Colours are literals here because no brand
- * palette exists yet (see a11y.check_contrast / week4 D6) — when Phase 5 binds
- * one it arrives through props like everything else.
- *
- * The type is deliberately loose: slots are validated in Python against the
- * template's own param schema before they ever reach this file, and duplicating
- * that schema in TypeScript would create a second source of truth.
+ * No Date.now(), no Math.random(), no network fetches. Motion is a pure
+ * function of `frame`, which is what makes a Remotion composition cacheable.
+ * The webfont is pinned in `fonts.ts` before any frame paints.
  */
 
 type Cue = {
@@ -44,8 +47,6 @@ type SceneProps = {
   cues: Cue[];
   captionSafeBottom: number;
   minFontPx: number;
-  // Decided by the resolver (§11.2 phase one), carried here. Never computed
-  // in this file: R1 keeps duration in one place.
   durationInFrames: number;
 };
 
@@ -58,14 +59,7 @@ export const sceneSchemaDefaults: SceneProps = {
   durationInFrames: 90,
 };
 
-
-/** §9.2 signalling, resolved: is this cue active at this frame? */
-const cueActive = (cue: Cue, seconds: number) =>
-  seconds >= cue.atSeconds && seconds < cue.atSeconds + 1.2;
-
-/** A build reveals its items in order across the scene, deterministically. */
-const revealed = (index: number, count: number, progress: number) =>
-  progress >= (index + 1) / (count + 1);
+// ------------------------------------------------------------- helpers
 
 const asList = (v: unknown): unknown[] => (Array.isArray(v) ? v : []);
 const asText = (v: unknown): string => (typeof v === "string" ? v : "");
@@ -79,6 +73,32 @@ const label = (item: unknown): string => {
   return "";
 };
 
+const cells = (row: unknown): string[] => {
+  const c = (row as Record<string, unknown>)?.cells;
+  return Array.isArray(c) ? c.map((x) => asText(x)) : [];
+};
+
+/** §9.2 signalling, resolved: is this cue active at this frame? */
+const cueActive = (cue: Cue, seconds: number) =>
+  seconds >= cue.atSeconds && seconds < cue.atSeconds + 1.2;
+
+/**
+ * §14 progressive disclosure: "one conceptual unit at a time".
+ *
+ * An item is revealed once the scene has progressed past its share, and stays
+ * revealed — §9.5: "when a new row enters, old rows stay stable", and §9.4:
+ * "previously introduced information should remain visible ... this preserves
+ * the learner's mental map".
+ */
+const revealed = (index: number, count: number, progress: number) =>
+  progress >= (index + 1) / (count + 1);
+
+/** §3: a cued text element takes the signal role — "look here". */
+const cuedText = (on: boolean): React.CSSProperties =>
+  on ? { color: color.signal } : {};
+
+// ------------------------------------------------------------ the shell
+
 export const Scene: React.FC<SceneProps> = ({
   template,
   slots,
@@ -90,9 +110,6 @@ export const Scene: React.FC<SceneProps> = ({
   const { fps, durationInFrames, height } = useVideoConfig();
   const seconds = frame / fps;
   const progress = durationInFrames > 1 ? frame / (durationInFrames - 1) : 1;
-
-  // §16.2: the bottom 15% is a caption exclusion zone in EVERY template. It is
-  // reserved here as layout, not decoration, so no template can opt out.
   const safeBottomPx = Math.round(height * captionSafeBottom);
 
   const active = new Set(
@@ -112,20 +129,10 @@ export const Scene: React.FC<SceneProps> = ({
       }}
     >
       {/*
-        §4's safe content region, as an absolutely positioned box rather than
-        padding on a centred flex column.
-      
-        The old shell was `padding: 96` + `justifyContent: center`, which is
-        why every scene sat in the upper-left with the bottom 30–40% dead
-        (ISSUE-17): a centred column with one short child centres that child
-        and leaves everything else empty. §9 asks for the opposite —
-        "Do not vertically center title cards", "Do not center the sentence
-        vertically by default" — because a learner should recognise the same
-        content boundary across templates, and a box that moves with its
-        contents is not a boundary.
-      
-        Every template now places INSIDE this region and owns its own vertical
-        anchor.
+        §4's safe content region. Absolutely positioned rather than padding on a
+        centred flex column: a centred column with one short child centres that
+        child and leaves the rest of the frame dead, which was ISSUE-17. Each
+        template owns its vertical anchor inside this box.
       */}
       <div
         style={{
@@ -145,13 +152,7 @@ export const Scene: React.FC<SceneProps> = ({
         />
       </div>
 
-      {/*
-        §16.2's caption exclusion zone. Rendered as nothing, reserved as
-        layout: `contentHeight` already subtracts it, so this element exists
-        only to make the reservation visible to anyone reading the component.
-        `captionSafeBottom` comes from the template registry and is asserted
-        against §16.2's 15% by the accessibility linter.
-      */}
+      {/* §16.2's caption exclusion zone, reserved as layout. */}
       <div
         style={{
           position: "absolute",
@@ -165,25 +166,7 @@ export const Scene: React.FC<SceneProps> = ({
   );
 };
 
-/**
- * The visual a cue produces on a scalar text slot.
- *
- * Every template can host signalling now (§9.2: "never zero"), so every
- * template has to be able to DRAW one. Previously only the list templates
- * consulted `isCued`, and five templates carried a `supports_signalling=False`
- * flag that switched §9.2 off rather than admitting the renderer had no way to
- * show a cue on them. Flipping that flag without this would have produced cues
- * the renderer silently dropped — the other half of the same bug.
- */
-const cued = (on: boolean): React.CSSProperties =>
-  on
-    ? {
-        color: color.signal,
-        // Kept subtle: a highlight directs attention, it does not redesign the
-        // frame mid-scene. §9.2's scale_pulse bounds live in signal_designer.
-        textDecorationColor: ACCENT,
-      }
-    : {};
+// ------------------------------------------------------------ the layouts
 
 const Body: React.FC<{
   template: string;
@@ -192,53 +175,99 @@ const Body: React.FC<{
   minFontPx: number;
   isCued: (slot: string, i: number, id?: string) => boolean;
 }> = ({ template, slots, progress, minFontPx, isCued }) => {
-  // §6's type scale, by ROLE. Sizes were previously arithmetic (minFontPx x3,
-  // x2, x1), which produced three sizes with no hierarchy beyond magnitude and
-  // no way to say "this is a label" or "this is a caption". A role carries the
-  // weight and line-height with it.
-  //
-  // Nothing here shrinks to fit. §6: "Never solve a layout problem by shrinking
-  // type below 24 px" — when copy overflows, `linter.check_type_fits` blocks
-  // and tells the author to reduce copy, restructure or split the scene.
   const t = typeScale;
+  // §6's floor, clamping UP only. Nothing here shrinks to fit: when copy
+  // overflows, `linter.check_type_fits` blocks and names §6's four remedies.
   const px = (r: { size: number }) => Math.max(r.size, minFontPx);
 
   switch (template) {
-    case "key_phrase":
+    // ================================================== §9.1 cold_open
+    //
+    // "Use a strong left-aligned composition ... Vertical center around
+    // 42–48% ... Do not center the sentence vertically by default. The current
+    // centered approach creates dead space beneath the content."
+    case "cold_open": {
+      const supporting = asText(slots.premise_line);
       return (
-        <div>
+        <div
+          style={{
+            position: "absolute",
+            // §9.1: content starts around x = 120–160 in frame terms. The
+            // content region already begins at 96, so a 32 inset lands at 128.
+            left: space.lg,
+            // §9.1's 42–48% optical centre, measured on the frame and
+            // expressed against the content box.
+            top: canvas.height * 0.44 - contentTop,
+            width: columns(9),
+            transform: "translateY(-50%)",
+          }}
+        >
+          {asText(slots.module_label) ? (
+            <div
+              style={{
+                fontSize: px(t.label),
+                fontWeight: t.label.weight,
+                letterSpacing: 2,
+                color: color.signal,
+                marginBottom: space.md,
+              }}
+            >
+              {asText(slots.module_label).toUpperCase()}
+            </div>
+          ) : null}
+
           <div
             style={{
               fontSize: px(t.display),
-              fontWeight: t.h2.weight,
-              lineHeight: 1.15,
-              ...cued(isCued("phrase", 0)),
+              fontWeight: t.display.weight,
+              lineHeight: t.display.line,
+              ...cuedText(isCued("headline", 0)),
             }}
           >
-            {asText(slots.phrase)}
+            {asText(slots.headline)}
           </div>
-          {asText(slots.emphasis) ? (
+
+          {supporting ? (
             <div
               style={{
-                fontSize: px(t.h2),
-                marginTop: space.md,
+                fontSize: px(t.body),
+                fontWeight: t.body.weight,
                 color: color.inkMuted,
-                ...cued(isCued("emphasis", 0)),
+                marginTop: space.lg,
               }}
             >
-              {asText(slots.emphasis)}
+              {supporting}
             </div>
           ) : null}
         </div>
       );
+    }
 
+    // ================================================= §9.2 title_card
+    //
+    // "Top-left anchored ... Do not vertically center title cards."
     case "title_card":
       return (
-        <div>
+        <div style={{ width: columns(11) }}>
+          {asText(slots.module_label) ? (
+            <div
+              style={{
+                fontSize: px(t.label),
+                fontWeight: t.label.weight,
+                letterSpacing: 2,
+                color: color.signal,
+                marginBottom: space.md,
+              }}
+            >
+              {asText(slots.module_label).toUpperCase()}
+            </div>
+          ) : null}
           <div
             style={{
-              fontSize: px(t.display), fontWeight: t.display.weight, lineHeight: t.display.line,
-              ...cued(isCued("title", 0)),
+              fontSize: px(t.h1),
+              fontWeight: t.h1.weight,
+              lineHeight: t.h1.line,
+              ...cuedText(isCued("title", 0)),
             }}
           >
             {asText(slots.title)}
@@ -246,8 +275,13 @@ const Body: React.FC<{
           {asText(slots.subtitle) ? (
             <div
               style={{
-                fontSize: px(t.body), fontWeight: t.body.weight, color: color.inkMuted, marginTop: space.md,
-                ...cued(isCued("subtitle", 0)),
+                fontSize: px(t.body),
+                fontWeight: t.body.weight,
+                lineHeight: t.body.line,
+                color: color.inkMuted,
+                marginTop: space.md,
+                width: columns(9),
+                ...cuedText(isCued("subtitle", 0)),
               }}
             >
               {asText(slots.subtitle)}
@@ -256,176 +290,243 @@ const Body: React.FC<{
         </div>
       );
 
-    case "term_card":
-      return (
-        <div>
-          <div style={{ fontSize: px(t.h1), fontWeight: t.h1.weight,
-                        ...cued(isCued("term", 0)) }}>
-            {asText(slots.term)}
-          </div>
-          <div style={{ fontSize: px(t.body), fontWeight: t.body.weight, color: color.inkMuted, marginTop: space.md,
-                        ...cued(isCued("characteristic", 0)) }}>
-            {asText(slots.characteristic)}
-          </div>
-        </div>
-      );
-
-    case "cold_open":
-      // `premise` describes the SHOT and is still not typeset (week4 D2). But
-      // returning an empty div drew a genuinely blank frame — measured 0.00%
-      // ink across three v2 scenes, 33s of runtime showing nothing. `headline`
-      // is a required slot precisely so this template always has something to
-      // draw while there is no asset pipeline.
-      return (
-        <div style={{ fontSize: px(t.display), fontWeight: t.display.weight, lineHeight: t.display.line,
-                      ...cued(isCued("headline", 0)) }}>
-          {asText(slots.headline)}
-        </div>
-      );
-
-    case "concept_illustration":
-      return (
-        <div style={{ fontSize: px(t.h2), color: color.inkMuted,
-                      ...cued(isCued("caption", 0)) }}>
-          {asText(slots.caption)}
-        </div>
-      );
-
-    case "table_build": {
-      // A real grid. Rows carry one cell per column (ParamType.ROW_LIST) and
-      // each cell sits in its own column, so the headers line up with the data
-      // under them. Previously a row was one string and the "columns" were
-      // decorative — the headers aligned with nothing at all.
-      const cols = asList(slots.columns);
-      const rows = asList(slots.rows);
-      const grid = `repeat(${Math.max(1, cols.length)}, 1fr)`;
-      return (
-        <div style={{ fontSize: px(t.body), lineHeight: t.body.line, width: "100%" }}>
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: grid,
-              gap: `0 ${canvas.gutter}px`,
-              fontWeight: t.h2.weight,
-              paddingBottom: space.xs,
-              borderBottom: `3px solid ${color.structure}`,
-            }}
-          >
-            {cols.map((c, i) => (
-              <div key={i}>{label(c)}</div>
-            ))}
-          </div>
-          {rows.map((r, i) => {
-            if (!revealed(i, rows.length, progress)) return null;
-            const cells = asList((r as Record<string, unknown>)?.cells);
-            const cued = isCued("rows", i);
-            return (
-              <div
-                key={i}
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: grid,
-                  gap: `0 ${canvas.gutter}px`,
-                  padding: `${space.sm}px 0`,
-                  borderBottom: `1px solid ${color.structureSubtle}`,
-                  color: cued ? color.signal : color.ink,
-                  fontWeight: cued ? 700 : 400,
-                }}
-              >
-                {cells.map((c, j) => (
-                  <div key={j}>{label(c)}</div>
-                ))}
-              </div>
-            );
-          })}
-        </div>
-      );
-    }
-
-    case "terminal_replay": {
-      const steps = asList(slots.steps);
+    // ================================================= §9.3 key_phrase
+    //
+    // "Use a large left-aligned text block ... 10 columns maximum ... Do not
+    // put the sentence in a giant centered box."
+    //
+    // The emphasis line is §9.3's resolution — "the second clause becomes the
+    // resolution" — so when cued it takes the ANSWER role, not signal. That is
+    // §3's distinction doing real work: the phrase is what is being discussed,
+    // the emphasis is what it resolves to.
+    case "key_phrase":
       return (
         <div
           style={{
-            fontFamily: font.mono,
-            fontSize: px(t.body),
-            lineHeight: 1.6,
+            position: "absolute",
+            top: contentHeight * 0.32,
+            width: columns(10),
           }}
         >
-          {steps.map((s, i) =>
-            revealed(i, steps.length, progress) ? (
-              <div key={i} style={{ color: isCued("steps", i) ? color.signal : color.ink }}>
-                <span style={{ color: color.inkMuted }}>$ </span>
-                {label(s)}
-              </div>
-            ) : null,
-          )}
-        </div>
-      );
-    }
-
-    case "state_timeline": {
-      // LANES. Each step names its track and is drawn in that track's column,
-      // at its own row, so two things advancing in parallel look parallel.
-      //
-      // The previous version drew the track names as a header strip and then a
-      // flat left-aligned list of steps underneath, with the track name as a
-      // text prefix. It animated — steps did reveal in order — but it was not a
-      // timeline: nothing sat in a lane, half the frame was empty, and the one
-      // property that made this the right template for two interleaving
-      // transactions was the property it did not show.
-      const tracks = asList(slots.tracks).map(label);
-      const steps = asList(slots.steps);
-      const grid = `repeat(${Math.max(1, tracks.length)}, 1fr)`;
-      const laneOf = (step: unknown) => {
-        const t = label((step as Record<string, unknown>)?.track);
-        const i = tracks.indexOf(t);
-        return i < 0 ? 0 : i;
-      };
-      return (
-        <div style={{ fontSize: px(t.body), width: "100%" }}>
           <div
             style={{
-              display: "grid",
-              gridTemplateColumns: grid,
-              gap: `0 ${canvas.gutter}px`,
-              paddingBottom: space.xs,
-              borderBottom: `3px solid ${color.structure}`,
+              fontSize: px(t.display),
+              fontWeight: t.display.weight,
+              lineHeight: t.display.line,
+              ...cuedText(isCued("phrase", 0)),
             }}
           >
-            {tracks.map((t, i) => (
-              <div
-                key={i}
-                style={{
-                  fontSize: px(t.label),
-                  fontWeight: t.label.weight,
-                  color: isCued("tracks", i) ? color.signal : color.ink,
-                }}
-              >
-                {t}
-              </div>
-            ))}
+            {asText(slots.phrase)}
           </div>
+          {asText(slots.emphasis) ? (
+            <div
+              style={{
+                fontSize: px(t.h2),
+                fontWeight: t.h2.weight,
+                color: isCued("emphasis", 0) ? color.answer : color.inkMuted,
+                marginTop: space.lg,
+              }}
+            >
+              {asText(slots.emphasis)}
+            </div>
+          ) : null}
+        </div>
+      );
 
+    // ============================================== §9.4 state_timeline
+    //
+    // "For parallel processes, use two horizontal lanes ... The lanes must have
+    // a visible relationship ... 'two lanes but no visual language
+    // distinguishing them' should be fixed by giving each lane: a persistent
+    // label, distinct position, shared timeline, clear relationship markers.
+    // Do not solve parallelism with different colors alone."
+    //
+    // Each lane gets a persistent label, its own baseline, and numbered markers
+    // on a SHARED horizontal time axis — step n sits at the same x in every
+    // lane, which is what makes the parallelism readable rather than decorative.
+    case "state_timeline": {
+      const tracks = asList(slots.tracks).map(label);
+      const steps = asList(slots.steps);
+      const laneOf = (step: unknown) => {
+        const name = label((step as Record<string, unknown>)?.track);
+        const i = tracks.indexOf(name);
+        return i < 0 ? 0 : i;
+      };
+      const stepCount = Math.max(1, steps.length);
+      const axisLeft = columns(2) + space.md;
+      const axisWidth = contentWidth - axisLeft;
+      const xOf = (i: number) => axisLeft + (axisWidth * (i + 0.5)) / stepCount;
+
+      return (
+        <div style={{ position: "relative", width: "100%", height: "100%" }}>
           {asText(slots.invariant) ? (
             <div
               style={{
-                margin: `${space.md}px 0 ${space.lg}px`,
+                display: "inline-block",
                 padding: `${space.xs}px ${space.md}px`,
+                borderRadius: 8,
                 border: `1px solid ${color.signalBorder}`,
-                borderRadius: 10,
-                color: color.inkMuted,
-                fontWeight: t.h2.weight,
+                backgroundColor: color.surfaceSignal,
+                color: color.ink,
+                fontSize: px(t.bodyStrong),
+                fontWeight: t.bodyStrong.weight,
+                marginBottom: space.lg,
               }}
             >
               {asText(slots.invariant)}
             </div>
           ) : null}
 
-          {steps.map((st, i) => {
-            if (!revealed(i, steps.length, progress)) return null;
-            const lane = laneOf(st);
-            const cued = isCued("steps", i);
+          {/*
+            Lanes share the remaining height rather than taking a fixed 160px
+            each, which left the bottom half of the frame empty (ISSUE-17). Two
+            lanes fill the region; five lanes compress evenly.
+          */}
+          {tracks.map((track, lane) => (
+            <div
+              key={lane}
+              style={{
+                position: "relative",
+                height: `${100 / Math.max(1, tracks.length)}%`,
+              }}
+            >
+              {/* persistent lane label — §9.4's "lane language" */}
+              <div
+                style={{
+                  position: "absolute",
+                  left: 0,
+                  top: "50%",
+                  transform: "translateY(-50%)",
+                  width: columns(2),
+                  fontSize: px(t.label),
+                  fontWeight: t.label.weight,
+                  letterSpacing: 2,
+                  color: isCued("tracks", lane) ? color.signal : color.inkMuted,
+                }}
+              >
+                {track.toUpperCase()}
+              </div>
+
+              {/* the lane's own baseline — structure, §12 level 1 */}
+              <div
+                style={{
+                  position: "absolute",
+                  left: axisLeft,
+                  right: 0,
+                  top: "50%",
+                  height: 2,
+                  backgroundColor: color.structure,
+                }}
+              />
+
+              {steps.map((st, i) => {
+                if (laneOf(st) !== lane) return null;
+                if (!revealed(i, steps.length, progress)) return null;
+                const cued = isCued("steps", i);
+                const isLast = i === steps.length - 1;
+                // §9.4: "The active state is blue. A confirmed resolution can
+                // become green." The final step is the resolution.
+                const resolved = isLast && progress > 0.95;
+                const marker = cued
+                  ? color.signal
+                  : resolved
+                    ? color.answer
+                    : color.structure;
+                const onMarker = marker === color.structure;
+                return (
+                  <div
+                    key={i}
+                    style={{
+                      position: "absolute",
+                      left: xOf(i),
+                      // Centred on the lane's own baseline, so two lanes fill
+                      // the region instead of hugging its top edge.
+                      top: "50%",
+                      marginTop: -space.lg,
+                      // Wide enough that a short label does not wrap mid-phrase.
+                      width: (axisWidth / stepCount) * 1.6,
+                      transform: "translateX(-50%)",
+                    }}
+                  >
+                    <div
+                      style={{
+                        width: 32,
+                        height: 32,
+                        borderRadius: 10,
+                        backgroundColor: onMarker ? color.surface : marker,
+                        border: `2px solid ${marker}`,
+                        color: onMarker ? color.inkMuted : color.surface,
+                        fontSize: px(t.label),
+                        fontWeight: t.label.weight,
+                        textAlign: "center",
+                        lineHeight: "32px",
+                        margin: "0 auto",
+                      }}
+                    >
+                      {i + 1}
+                    </div>
+                    <div
+                      style={{
+                        marginTop: space.xs,
+                        fontSize: px(t.body),
+                        lineHeight: t.body.line,
+                        textAlign: "center",
+                        color: cued ? color.signal : color.ink,
+                      }}
+                    >
+                      {label(st)}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          ))}
+        </div>
+      );
+    }
+
+    // ================================================ §9.5 table_build
+    //
+    // "Header #FAFAFA, text #262626, border #D9D9D9, radius 8. Rows white,
+    // subtle divider, selected/current row #F5FAFF, active signal #148AFF."
+    //
+    // "When a new row enters, old rows stay stable." And on cell emphasis:
+    // "row receives soft blue background, relevant cell receives signal
+    // emphasis. Do not color the entire table blue."
+    case "table_build": {
+      const cols = asList(slots.columns).map(label);
+      const rows = asList(slots.rows);
+      const grid = `repeat(${Math.max(1, cols.length)}, 1fr)`;
+      const highlight =
+        typeof slots.highlight_row === "number"
+          ? (slots.highlight_row as number)
+          : -1;
+      return (
+        <div style={{ width: "100%", fontSize: px(t.body) }}>
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: grid,
+              gap: `0 ${canvas.gutter}px`,
+              backgroundColor: color.surfaceSubtle,
+              border: `1px solid ${color.structure}`,
+              borderRadius: 8,
+              padding: `${space.sm}px ${space.md}px`,
+              fontSize: px(t.label),
+              fontWeight: t.label.weight,
+              letterSpacing: 2,
+              color: color.ink,
+            }}
+          >
+            {cols.map((c, i) => (
+              <div key={i}>{c.toUpperCase()}</div>
+            ))}
+          </div>
+
+          {rows.map((r, i) => {
+            if (!revealed(i, rows.length, progress)) return null;
+            const rowCued = isCued("rows", i);
+            const isAnswer = i === highlight && progress > 0.9;
             return (
               <div
                 key={i}
@@ -433,23 +534,37 @@ const Body: React.FC<{
                   display: "grid",
                   gridTemplateColumns: grid,
                   gap: `0 ${canvas.gutter}px`,
-                  padding: `${space.xs}px 0`,
+                  padding: `${space.md}px`,
+                  borderBottom: `1px solid ${color.structureSubtle}`,
+                  // §9.5: the current row takes the soft signal surface; the
+                  // resolved row takes the answer surface — §3's distinction.
+                  backgroundColor: isAnswer
+                    ? color.answerSoft
+                    : rowCued
+                      ? color.surfaceSignal
+                      : color.surface,
+                  lineHeight: t.body.line,
                 }}
               >
-                {tracks.map((_, col) => (
+                {cells(r).map((c, j) => (
                   <div
-                    key={col}
+                    key={j}
                     style={{
-                      // Only the owning lane draws; the others hold the column
-                      // open so later steps stay aligned under their track.
-                      visibility: col === lane ? "visible" : "hidden",
-                      padding: `${space.xs}px ${space.sm}px`,
-                      borderLeft: `6px solid ${cued ? color.signal : color.ink}`,
-                      backgroundColor: cued ? color.surfaceSignal : color.surfaceSubtle,
-                      color: cued ? color.signal : color.ink,
+                      // Only the leading cell takes the accent, not the whole
+                      // table — §9.5: "Do not color the entire table blue."
+                      color:
+                        rowCued && j === 0
+                          ? color.signal
+                          : isAnswer && j === 0
+                            ? color.answer
+                            : color.ink,
+                      fontWeight:
+                        rowCued || isAnswer
+                          ? t.bodyStrong.weight
+                          : t.body.weight,
                     }}
                   >
-                    {label(st)}
+                    {c}
                   </div>
                 ))}
               </div>
@@ -459,35 +574,174 @@ const Body: React.FC<{
       );
     }
 
+    // ========================================= §9.6 concept_illustration
+    //
+    // "Typographic/diagrammatic only. External imagery is optional and
+    // future-facing." §0 closes ISSUE-15 here: the asset slot stays
+    // architecturally optional and the template draws cards, connectors and
+    // numbered markers from the design system instead of waiting for stock.
+    //
+    // §9.6's example is a vertical flow: RAW DATA → FEATURES → MODEL → …
+    case "concept_illustration": {
+      const steps = asList(slots.steps).map(label);
+      const caption = asText(slots.caption);
+      const flow = steps.length ? steps : caption ? [caption] : [];
+      const heading = steps.length ? caption : "";
+      return (
+        <div style={{ width: columns(8) }}>
+          {heading ? (
+            <div
+              style={{
+                fontSize: px(t.h2),
+                fontWeight: t.h2.weight,
+                marginBottom: space.lg,
+                ...cuedText(isCued("caption", 0)),
+              }}
+            >
+              {heading}
+            </div>
+          ) : null}
+
+          {flow.map((node, i) => {
+            if (!revealed(i, flow.length, progress)) return null;
+            const cued = isCued("steps", i) || isCued("caption", i);
+            const isLast = i === flow.length - 1;
+            return (
+              <div key={i}>
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: space.md,
+                    padding: `${space.md}px`,
+                    borderRadius: 10,
+                    border: `1px solid ${
+                      cued ? color.signalBorder : color.structure
+                    }`,
+                    backgroundColor: cued
+                      ? color.surfaceSignal
+                      : color.surface,
+                  }}
+                >
+                  <div
+                    style={{
+                      width: 32,
+                      height: 32,
+                      borderRadius: 8,
+                      backgroundColor: cued
+                        ? color.signal
+                        : color.surfaceSubtle,
+                      color: cued ? color.surface : color.inkMuted,
+                      fontSize: px(t.label),
+                      fontWeight: t.label.weight,
+                      textAlign: "center",
+                      lineHeight: "32px",
+                    }}
+                  >
+                    {i + 1}
+                  </div>
+                  <div
+                    style={{
+                      fontSize: px(t.h3),
+                      fontWeight: t.h3.weight,
+                      color: cued ? color.signal : color.ink,
+                    }}
+                  >
+                    {node}
+                  </div>
+                </div>
+                {/* §9.6's connector, at structural weight (§12 level 1) */}
+                {!isLast ? (
+                  <div
+                    style={{
+                      width: 2,
+                      height: space.md,
+                      backgroundColor: color.structure,
+                      marginLeft: space.lg,
+                    }}
+                  />
+                ) : null}
+              </div>
+            );
+          })}
+        </div>
+      );
+    }
+
+    // ==================================================================
+    // Templates the design system does NOT cover — ISSUE-20.
+    //
+    // §9 designs six; the registry holds eleven. These five render from the
+    // token layer so they stay usable and legible, but they have no design
+    // section, and inventing one here would produce exactly the "six unrelated
+    // motion-graphics templates" outcome §0 warns against.
+    // ==================================================================
+
+    case "term_card":
+      return (
+        <div style={{ width: columns(9) }}>
+          <div
+            style={{
+              fontSize: px(t.h1),
+              fontWeight: t.h1.weight,
+              ...cuedText(isCued("term", 0)),
+            }}
+          >
+            {asText(slots.term)}
+          </div>
+          <div
+            style={{
+              fontSize: px(t.body),
+              color: color.inkMuted,
+              marginTop: space.md,
+              ...cuedText(isCued("characteristic", 0)),
+            }}
+          >
+            {asText(slots.characteristic)}
+          </div>
+        </div>
+      );
+
     case "labelled_diagram": {
       const nodes = asList(slots.nodes);
       return (
-        <div>
+        <div style={{ width: "100%" }}>
           {asText(slots.title) ? (
-            <div style={{ fontSize: px(t.h2), fontWeight: t.h2.weight, marginBottom: space.lg }}>
+            <div
+              style={{
+                fontSize: px(t.h2),
+                fontWeight: t.h2.weight,
+                marginBottom: space.lg,
+              }}
+            >
               {asText(slots.title)}
             </div>
           ) : null}
-          <div style={{ display: "flex", gap: space.xl, flexWrap: "wrap" }}>
+          <div style={{ display: "flex", gap: space.md, flexWrap: "wrap" }}>
             {nodes.map((n, i) => {
-              const id =
-                n && typeof n === "object"
-                  ? asText((n as Record<string, unknown>).id)
-                  : undefined;
-              return revealed(i, nodes.length, progress) ? (
+              if (!revealed(i, nodes.length, progress)) return null;
+              const id = asText((n as Record<string, unknown>)?.id);
+              const cued = isCued("nodes", i, id);
+              return (
                 <div
                   key={i}
                   style={{
-                    fontSize: px(t.h2),
+                    fontSize: px(t.h3),
+                    fontWeight: t.h3.weight,
                     padding: `${space.md}px ${space.lg}px`,
-                    border: `4px solid ${isCued("nodes", i, id) ? color.signal : color.ink}`,
+                    border: `1px solid ${
+                      cued ? color.signalBorder : color.structure
+                    }`,
+                    backgroundColor: cued
+                      ? color.surfaceSignal
+                      : color.surface,
                     borderRadius: 10,
-                    color: isCued("nodes", i, id) ? color.signal : color.ink,
+                    color: cued ? color.signal : color.ink,
                   }}
                 >
                   {label(n)}
                 </div>
-              ) : null;
+              );
             })}
           </div>
         </div>
@@ -497,16 +751,62 @@ const Body: React.FC<{
     case "series_build": {
       const series = asList(slots.series);
       return (
-        <div style={{ fontSize: px(t.body) }}>
+        <div style={{ width: columns(10) }}>
           {asText(slots.title) ? (
-            <div style={{ fontSize: px(t.h2), fontWeight: t.h2.weight, marginBottom: space.lg }}>
+            <div
+              style={{
+                fontSize: px(t.h2),
+                fontWeight: t.h2.weight,
+                marginBottom: space.lg,
+              }}
+            >
               {asText(slots.title)}
             </div>
           ) : null}
           {series.map((s, i) =>
             revealed(i, series.length, progress) ? (
-              <div key={i} style={{ padding: `${space.xs}px 0`,
-                                    ...cued(isCued("series", i)) }}>
+              <div
+                key={i}
+                style={{
+                  fontSize: px(t.body),
+                  padding: `${space.xs}px 0`,
+                  borderBottom: `1px solid ${color.structureSubtle}`,
+                  ...cuedText(isCued("series", i)),
+                }}
+              >
+                {label(s)}
+              </div>
+            ) : null,
+          )}
+        </div>
+      );
+    }
+
+    case "terminal_replay": {
+      const steps = asList(slots.steps);
+      return (
+        <div
+          style={{
+            width: columns(10),
+            padding: `${space.md}px`,
+            borderRadius: 10,
+            border: `1px solid ${color.structure}`,
+            backgroundColor: color.surfaceSubtle,
+          }}
+        >
+          {steps.map((s, i) =>
+            revealed(i, steps.length, progress) ? (
+              <div
+                key={i}
+                style={{
+                  fontFamily: font.mono,
+                  fontSize: px(t.mono),
+                  lineHeight: t.mono.line,
+                  // §17: highlight only the relevant line.
+                  color: isCued("steps", i) ? color.signal : color.ink,
+                }}
+              >
+                <span style={{ color: color.inkSubtle }}>$ </span>
                 {label(s)}
               </div>
             ) : null,
@@ -518,10 +818,17 @@ const Body: React.FC<{
     case "ui_walkthrough": {
       const steps = asList(slots.steps);
       return (
-        <div style={{ fontSize: px(t.mono), lineHeight: t.mono.line }}>
+        <div style={{ width: columns(9) }}>
           {steps.map((s, i) =>
             revealed(i, steps.length, progress) ? (
-              <div key={i} style={{ padding: "8px 0" }}>
+              <div
+                key={i}
+                style={{
+                  fontSize: px(t.body),
+                  padding: `${space.xs}px 0`,
+                  ...cuedText(isCued("steps", i)),
+                }}
+              >
                 {i + 1}. {label(s)}
               </div>
             ) : null,
@@ -532,9 +839,16 @@ const Body: React.FC<{
 
     default:
       // An unknown template must be loud, not blank: a silently empty scene is
-      // one nobody notices until the whole video is assembled.
+      // one nobody notices until the whole video is assembled. §3's error role
+      // is what "this is broken" looks like.
       return (
-        <div style={{ fontSize: px(t.h2), color: color.signal, fontWeight: t.h2.weight }}>
+        <div
+          style={{
+            fontSize: px(t.h2),
+            color: color.error,
+            fontWeight: t.h2.weight,
+          }}
+        >
           UNKNOWN TEMPLATE: {template}
         </div>
       );
