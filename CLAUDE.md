@@ -29,7 +29,7 @@ video shipped. Every architectural decision serves that. Nothing else does.
 store, beat-level invalidation, orchestrator, worker pools, CLI — is built and
 its exit criteria pass. No real model calls, no real renders, no UI yet.
 
-## The seven invariants
+## The eight invariants
 
 These are not style preferences. Each one, if broken, breaks something that
 cannot be repaired without a rewrite. If a task seems to require breaking one,
@@ -72,6 +72,24 @@ IDs: pinned in config, never "latest".
 silently at 2am and shows a red dot in a log is a pipeline nobody trusts. Every
 failure path ends in a recorded state with the error, the offending input, and a
 human-actionable next step.
+
+**8. Regenerating a stochastic stage is not a fix for a factual error — it is a
+re-roll.** MEASURED. ISSUE-8's false claim vanished when a script was
+regenerated for an unrelated reason, and both of us read that as the problem
+going away; nothing had detected it. Later, regenerating deliberately to remove
+a blocking claim produced a narration the Fact Challenger scored *worse* — 5
+spans refuted in a majority of samples against the previous 3 — and reintroduced
+the exact error the challenger had already found once. The same two confusions
+recurred across independent generations, which makes them a property of the
+prompt and the topic rather than luck.
+
+So: when a model stage produces a wrong output, change the stage's inputs — the
+prompt, the constraints, the schema — and only then regenerate. A re-roll that
+happens to come back clean has told you nothing, because you have no evidence
+the next one will. Where the error is topic-specific, the input to change is
+`brief.factual_constraints`, which is per course; hardcoding a domain's
+semantics into a general prompt teaches every later course facts it does not
+need.
 
 ## Architecture in one screen
 

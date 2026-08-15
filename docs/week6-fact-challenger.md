@@ -234,3 +234,84 @@ three-sample video this is affordable for a gate run before review, and it is
 **not** affordable as a per-save check in an editor. §21's budget absorbs the
 former; the latter would need a cheaper tier or a diff-scoped run that
 challenges only changed spans.
+
+
+---
+
+## 7. The prompt fix worked — v4 ships
+
+**Sequence:** revert → fix the prompt → regenerate → re-challenge ×3 → compare.
+No regeneration happened between the revert and the prompt change.
+
+### The revert
+
+The previous narration existed only in the database, which the earlier
+regeneration overwrote. It was recovered from two committed artifacts:
+
+- **narration + span ids** from `var/render/mvcc-write-skew-v2.words.json`, the
+  §16.1 word sidecar written by the last render;
+- **`new_terms` and slot budgets** from `docs/script-v2-snapshot.md` at `cfb327d`.
+
+Both sources agree at 664 words exactly. Worth noting on its own: **the render
+artifacts were the backup**, and only by luck of the ordering — had I re-rendered
+after regenerating, the better narration would have been unrecoverable. Nothing
+in the pipeline versions a script.
+
+### The structural fix
+
+`brief.factual_constraints` — statements the narration may not contradict,
+supplied **per course by the brief**, not hardcoded in the prompt.
+`prompts/script_writer.v4.md` references the slot and states how to treat it; a
+test asserts the general prompt contains no topic facts (`Repeatable Read`,
+`PostgreSQL`, `ACCESS EXCLUSIVE`, `40001` must not appear in it). The constraints
+are in the brief's closure, so correcting one invalidates the script.
+
+Five constraints were set for this course, taken from the challenger's own
+findings. Brief v5 → v6.
+
+### The result
+
+| | reverted narration | v4 narration |
+|---|---|---|
+| claims | 25 | 22–24 per sample |
+| **blocking** | **1** (0.78) | **0, 0, 0** |
+| refuted | 3 | 0, 1, 2 (all sub-threshold: 0.60, 0.55, 0.50) |
+| spans surviving all 3 samples | not measured | **20 / 25** |
+
+**Ships.** Zero blocking in all three samples, and no refutation reached the 0.70
+threshold.
+
+### The five constraints were absorbed, and stated precisely
+
+Each now appears in the narration as a claim that *survives* adversarial attack:
+
+| constraint | resulting span | verdict |
+|---|---|---|
+| snapshot at first statement | `sp_5d57a833f3` "the transaction's first statement is what fixes its snapshot" | survives 0.88 |
+| FOR UPDATE aborts, does not re-read | `sp_3d294ceb47` "blocks and then aborts with a could-not-serialize error" | survives 0.70 |
+| limitation belongs to the level | `sp_7de0820bd7` SERIALIZABLE "tracks what each transaction's decision depended on" | survives 0.85 |
+| CHECK cannot span rows, not "constraints" | `sp_6b19bc4666` "a CHECK constraint cannot count across rows, and PostgreSQL has no multi-row assertion" | survives 0.80 |
+| table lock only ACCESS EXCLUSIVE | `sp_242208c0db` "an ACCESS EXCLUSIVE table lock stalls every other transaction… including plain reads" | survives 0.85 |
+
+The narration did not merely avoid the errors — it now states the precise
+versions, which is what the constraints asked for.
+
+### The two remaining warnings
+
+Neither is a PostgreSQL semantics error:
+
+- **s05 `sp_5086670411`** (unsupported ×2, refuted 0.55) — *"exactly four ways to
+  close the gap"*, when the fourth is then said not to work. A counting problem.
+- **s07 `sp_14f10a8719`** (unsupported ×3, 0.60) — `FOR UPDATE` recommended
+  without stating that every participant must take the same lock and that row
+  locks cannot cover phantoms. A missing precondition.
+
+Both are worth fixing and neither blocks.
+
+**Cost:** $0.6143 regeneration + $1.7155 re-challenge = **$2.33**.
+
+### Still to do before a review
+
+The narration changed, so the **storyboard and render are stale**. The shipped
+video on disk is the reverted narration. Re-storyboard and re-render before
+anything goes to an instructional designer.

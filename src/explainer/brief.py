@@ -102,6 +102,20 @@ class CourseBrief:
     brand_kit_ref: str | None = None
     tone: str = DEFAULT_TONE
     reference_video_ref: str | None = None
+    # Statements the narration MAY NOT CONTRADICT, supplied per course.
+    #
+    # These are topic-specific and belong to the brief, not to the prompt. A
+    # general prompt that hardcoded "the Repeatable Read snapshot is taken at
+    # the first statement" would teach every future course PostgreSQL semantics
+    # it does not need, and the next domain would inherit constraints that are
+    # noise at best and wrong at worst.
+    #
+    # They exist because MEASURED: regenerating v2 produced the same two
+    # factual confusions across independent runs (snapshot-taken-at-BEGIN, and
+    # FOR-UPDATE-just-waits). Recurring errors are a property of the prompt and
+    # the topic, not bad luck, and the place to fix a topic property is the
+    # topic's own brief.
+    factual_constraints: tuple[str, ...] = ()
 
     # Set by `save`/`load`. Not part of the closure — see `to_closure`.
     version: int = 0
@@ -119,6 +133,7 @@ class CourseBrief:
         out["audience"] = self.audience.to_json()
         out["source_material"] = list(self.source_material)
         out["locales"] = list(self.locales)
+        out["factual_constraints"] = list(self.factual_constraints)
         return out
 
     def to_closure(self) -> dict:
@@ -162,6 +177,7 @@ class CourseBrief:
             brand_kit_ref=obj.get("brand_kit_ref"),
             tone=obj.get("tone") or DEFAULT_TONE,
             reference_video_ref=obj.get("reference_video_ref"),
+            factual_constraints=tuple(obj.get("factual_constraints") or ()),
             version=int(obj.get("version") or version),
         )
 

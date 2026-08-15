@@ -365,6 +365,11 @@ def generate(conn, course_id: str | None, brief: CourseBrief, video: dict,
         # ISSUE-1/7: the exact set the recall gate tests against. The model is
         # given it so a repair is possible without guessing.
         "already_taught": (sorted(registry.terms) if registry is not None else []),
+        # Statements this course's narration may not contradict. Per-course and
+        # supplied by the brief, never hardcoded here: a general prompt carrying
+        # one domain's semantics teaches every later course facts it does not
+        # need. Empty for a course that has not needed any.
+        "factual_constraints": list(brief.factual_constraints),
         "course_position": {
             "video_number": position.get("ordinal"),
             "total_videos": position.get("total"),
