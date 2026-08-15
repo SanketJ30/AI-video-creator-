@@ -1,0 +1,29 @@
+[
+  {
+    "ref": "obvious",
+    "spans": [
+      {"id": "sp_neg_obv_01", "text": "In PostgreSQL an UPDATE writes a new version of the row rather than overwriting the old one in place."},
+      {"id": "sp_neg_obv_02", "text": "Each row version records the id of the transaction that created it in its xmin field."},
+      {"id": "sp_neg_obv_03", "text": "Under Repeatable Read, a transaction that reads the same row twice sees the same data both times, even if another transaction committed a change to that row in between."},
+      {"id": "sp_neg_obv_04", "text": "VACUUM reclaims row versions that are no longer visible to any running transaction."},
+      {"id": "sp_neg_obv_05", "text": "A plain SELECT does not block a concurrent UPDATE of the same row, and a concurrent UPDATE does not block that SELECT."},
+      {"id": "sp_neg_obv_06", "text": "PostgreSQL's default isolation level is Read Committed."},
+      {"id": "sp_neg_obv_07", "text": "Under Read Committed, each statement in a transaction sees a snapshot taken at the moment that statement began, so two statements in one transaction can see different data."},
+      {"id": "sp_neg_obv_08", "text": "Row versions written by a transaction that later rolls back are never visible to other transactions."}
+    ]
+  },
+  {
+    "ref": "counterintuitive",
+    "spans": [
+      {"id": "sp_neg_cnt_01", "text": "PostgreSQL's Repeatable Read is stronger than the SQL standard requires at that level: it also prevents phantom reads, which the standard permits under Repeatable Read."},
+      {"id": "sp_neg_cnt_02", "text": "Under SERIALIZABLE, a transaction that has only run SELECTs can still be aborted with a serialization failure."},
+      {"id": "sp_neg_cnt_03", "text": "Under Repeatable Read, the transaction's snapshot is taken at its first statement that reads or writes data, not at BEGIN."},
+      {"id": "sp_neg_cnt_04", "text": "Under Repeatable Read, a SELECT ... FOR UPDATE that waits on a row updated and committed by another transaction fails with a serialization error instead of returning the newer version."},
+      {"id": "sp_neg_cnt_05", "text": "Two transactions can each commit successfully under Repeatable Read and together leave the database violating a rule that neither of them violated on its own."},
+      {"id": "sp_neg_cnt_06", "text": "A transaction that rolls back after inserting a row still consumes the sequence value it took, so an identity column can contain gaps."},
+      {"id": "sp_neg_cnt_07", "text": "A single long-running transaction can prevent VACUUM from removing dead row versions in tables that transaction never touched."},
+      {"id": "sp_neg_cnt_08", "text": "Under Read Committed, an UPDATE that blocks on a row locked by another transaction will re-evaluate its WHERE clause against the newly committed version of that row once the lock is released."},
+      {"id": "sp_neg_cnt_09", "text": "A row version's xmax field can be set on a row that was never deleted, because xmax also records a transaction that locked or updated the row."}
+    ]
+  }
+]

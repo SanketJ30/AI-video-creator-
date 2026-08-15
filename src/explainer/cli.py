@@ -1200,7 +1200,11 @@ def _render_challenges(report) -> str:
 @facts_app.command("challenge")
 def facts_challenge(slug: str, video_ref: str,
                     save: bool = typer.Option(False, "--save"),
-                    scene: str | None = typer.Option(None, "--scene")) -> None:
+                    scene: str | None = typer.Option(None, "--scene"),
+                    samples: int = typer.Option(
+                        1, "--samples",
+                        help="run N times; this agent is stochastic and one "
+                             "clean pass is not evidence of a clean input")) -> None:
     """§7.2: refute every factual claim in one video's narration."""
     from .agents import fact_challenger as fc
     from .agents import script_writer as sw
@@ -1218,7 +1222,46 @@ def facts_challenge(slug: str, video_ref: str,
         context = {"topic": b.title, "description": b.description,
                    "audience": b.audience.to_json(),
                    "video_title": video["title"]}
-        report = fc.challenge(conn, course_id, scenes, context)
+        runs = []
+        for i in range(samples):
+            runs.append(fc.challenge(conn, course_id, scenes, context))
+            if samples > 1:
+                r = runs[-1]
+                typer.echo(err(f"--- sample {i + 1}/{samples}: {len(r.all)} "
+                               f"claims, {len(r.refuted)} refuted, "
+                               f"{len(r.blocking)} blocking",
+                               fg=typer.colors.BRIGHT_BLACK))
+        report = runs[0]
+        if samples > 1:
+            by_span: dict = {}
+            for r in runs:
+                for c in r.all:
+                    by_span.setdefault((c.scene_ref, c.span_id), []).append(c)
+            typer.echo("")
+            typer.echo(f"{'scene':6} {'span':22} verdicts across samples")
+            for (sref, sid), cs in sorted(by_span.items()):
+                worst = ("refuted" if any(c.verdict == "refuted" for c in cs)
+                         else "unsupported"
+                         if any(c.verdict == "unsupported" for c in cs)
+                         else "survives")
+                if worst == "survives":
+                    continue
+                colour = (typer.colors.RED if worst == "refuted"
+                          else typer.colors.YELLOW)
+                typer.echo(err(f"{sref:6} {sid:22} "
+                               f"{', '.join(f'{c.verdict}:{c.confidence:.2f}' for c in cs)}",
+                               fg=colour))
+                for c in cs:
+                    if c.verdict != "survives":
+                        typer.echo(f"         {c.claim}")
+                        typer.echo(f"         -> {c.attack[:220]}")
+                        break
+            clean = [k for k, cs in by_span.items()
+                     if all(c.verdict == "survives" for c in cs)]
+            typer.echo("")
+            typer.echo(f"{len(clean)}/{len(by_span)} spans survive in ALL "
+                       f"{samples} samples")
+            typer.echo(f"total cost ${sum(r.cost_usd for r in runs):.4f}")
         if save:
             fc.save(conn, str(video["id"]), report,
                     _scene_id_map(conn, str(video["id"])))
@@ -1233,20 +1276,60 @@ def facts_challenge(slug: str, video_ref: str,
 
 @facts_app.command("challenge-file")
 def facts_challenge_file(path: str,
-                         topic: str = typer.Option(..., "--topic")) -> None:
-    """Challenge narration from a JSON file — the positive-control path.
+                         topic: str = typer.Option(..., "--topic"),
+                         samples: int = typer.Option(
+                             1, "--samples",
+                             help="run N times; a rate needs more than one pass"),
+                         out: str | None = typer.Option(None, "--out")) -> None:
+    """Challenge narration from a JSON file — the control path.
 
     A checker that has never been shown a known-false claim has been run, not
-    tested. The file is `[{"ref": ..., "spans": [{"id":..., "text":...}]}]`.
+    tested; a checker that has never been shown known-TRUE claims has no
+    measured false-positive rate. The file is
+    `[{"ref": ..., "spans": [{"id":..., "text":...}]}]`.
+
+    With `--samples N` the same input is challenged N times and each span's
+    verdicts are reported together. This agent is stochastic, so a single clean
+    pass is not evidence of a clean input — which is the same reasoning §14.4
+    applies to the regression harness.
     """
     from .agents import fact_challenger as fc
     scenes = jsonlib.loads(Path(path).read_text(encoding="utf-8"))
-    with db.tx() as conn:
-        report = fc.challenge(conn, None, scenes, {"topic": topic})
-    typer.echo(_render_challenges(report))
+    runs, cost = [], 0.0
+    for i in range(samples):
+        with db.tx() as conn:
+            r = fc.challenge(conn, None, scenes, {"topic": topic})
+        runs.append(r)
+        cost += r.cost_usd
+        typer.echo(err(f"--- sample {i + 1}/{samples}: {len(r.all)} claims, "
+                       f"{len(r.refuted)} refuted, {len(r.blocking)} blocking",
+                       fg=typer.colors.BRIGHT_BLACK))
+
+    by_span: dict = {}
+    for r in runs:
+        for c in r.all:
+            by_span.setdefault((c.scene_ref, c.span_id), []).append(c)
+
     typer.echo("")
-    typer.echo(f"{len(report.all)} claim(s), {len(report.refuted)} refuted, "
-               f"{len(report.blocking)} blocking, ${report.cost_usd:.4f}")
+    typer.echo(f"{'span':22} {'verdicts across samples':38} worst")
+    for (scene_ref, span_id), cs in sorted(by_span.items()):
+        verdicts = [f"{c.verdict}:{c.confidence:.2f}" for c in cs]
+        worst = ("refuted" if any(c.verdict == "refuted" for c in cs)
+                 else "unsupported" if any(c.verdict == "unsupported" for c in cs)
+                 else "survives")
+        colour = (typer.colors.RED if worst == "refuted"
+                  else typer.colors.YELLOW if worst == "unsupported"
+                  else typer.colors.GREEN)
+        typer.echo(err(f"{span_id:22} {', '.join(verdicts):38} {worst}",
+                       fg=colour))
+
+    if out:
+        Path(out).write_text(jsonlib.dumps(
+            [[c.to_json() for c in r.all] for r in runs], indent=2,
+            ensure_ascii=False), encoding="utf-8")
+        typer.echo(f"raw verdicts written to {out}")
+    typer.echo("")
+    typer.echo(f"{samples} sample(s), ${cost:.4f} total")
 
 
 # ---------------------------------------------------------------------- render
