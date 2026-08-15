@@ -177,11 +177,17 @@ def test_no_visible_change_happens_in_a_single_frame(tmp_path):
     250 ms — 7.5 frames. An event above the noise floor that lasts one or two
     frames is therefore a switch, not a verb.
     """
+    # EVERY selectable template, not the two whose defects were already known.
+    # Checking them one at a time is whack-a-mole: `concept_illustration` and
+    # `state_timeline` were fixed, and a per-template re-measure then found the
+    # same class of defect again in `table_build` — a discrete fontWeight switch
+    # reflowing a whole row in one frame.
+    #
     # The cue fires at 5.5 s, AFTER the last BUILD has settled (§10.2's band
     # ends at frame 151 of 180). That separation is the whole fixture: with the
     # cue at 2 s the pop merges into the ongoing build run, no zero-delta frame
     # separates them, and this test passes on known-broken code. Measured on the
-    # defect: three clean 15-frame builds, then 6510 px in ONE frame.
+    # first defect: three clean 15-frame builds, then 6510 px in ONE frame.
     cases = [
         ("p_concept", "concept_illustration",
          {"caption": "What Repeatable Read guarantees",
@@ -196,6 +202,32 @@ def test_no_visible_change_happens_in_a_single_frame(tmp_path):
                     {"label": "goes off-call", "track": "Doctor B"},
                     {"label": "commits", "track": "Doctor A"}]},
          [{"kind": "highlight", "target": "steps[2]", "atSeconds": 5.5,
+           "params": {}}]),
+        ("p_table", "table_build",
+         {"columns": ["Remedy", "Why it works", "Cost"],
+          "rows": [{"cells": ["SERIALIZABLE", "aborts one transaction",
+                              "must retry"]},
+                   {"cells": ["SELECT FOR UPDATE", "locks the read rows",
+                              "only the locked rows"]},
+                   {"cells": ["Table lock", "blocks all writers",
+                              "stalls everything"]}]},
+         [{"kind": "highlight", "target": "rows[1]", "atSeconds": 5.5,
+           "params": {}}]),
+        ("p_cold", "cold_open",
+         {"headline": "How did nobody stay on call?",
+          "module_label": "WRITE SKEW",
+          "premise_line": "Both transactions commit without a single error."},
+         [{"kind": "highlight", "target": "headline", "atSeconds": 5.5,
+           "params": {}}]),
+        ("p_title", "title_card",
+         {"title": "Spot write skew Postgres lets commit",
+          "subtitle": "A pair of transactions, no serialization error"},
+         [{"kind": "highlight", "target": "subtitle", "atSeconds": 5.5,
+           "params": {}}]),
+        ("p_phrase", "key_phrase",
+         {"phrase": "Reports run often. Write skew is rare but costly.",
+          "emphasis": "rare but costly"},
+         [{"kind": "scale_pulse", "target": "emphasis", "atSeconds": 5.5,
            "params": {}}]),
     ]
     # Sampled pixels below which a run is dither rather than an element. The

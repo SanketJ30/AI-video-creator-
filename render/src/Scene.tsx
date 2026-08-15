@@ -306,15 +306,11 @@ const Body: React.FC<{
   const shown = (i: number, n: number, slot?: string) =>
     started(frame, i, n, durationInFrames) ||
     (slot ? narrationReached(slot, i) : false);
-  /**
-   * §12 level 4 — the scene's resolution, as a CONTINUOUS 0..1.
-   *
-   * `resolved` (the boolean) switched the answer colour in a single frame,
-   * which is the FOCUS strobe one layer up: §10.4 specifies a 400–700 ms
-   * transition "from neutral/signal to answer state", not a swap.
-   */
-  const resolveAmt = resolveAmount(frame, fps, durationInFrames);
-  const resolved = resolveAmt > 0.5;
+  // The scene's RESOLVE amount is applied once, at scene level, on the state
+  // container above — the two locals that used to live here fed the removed
+  // `highlight_row`-means-answer guess (ISSUE-21) and were left behind. One of
+  // them was `resolveAmt > 0.5`, which is exactly the boolean-over-a-continuous-
+  // amount shape that ISSUE-22 was.
 
   switch (template) {
     // ================================================== §9.1 cold_open
@@ -681,7 +677,6 @@ const Body: React.FC<{
           {rows.map((r, i) => {
             if (!shown(i, rows.length, "rows")) return null;
             const rowFocus = cueFocus("rows", i);
-            const rowCued = rowFocus > 0.001;
 
             return (
               <div
@@ -712,7 +707,15 @@ const Body: React.FC<{
                         j === 0 && rowFocus > 0.001
                           ? mix(color.ink, color.signal, rowFocus)
                           : color.ink,
-                      fontWeight: rowCued ? t.bodyStrong.weight : t.body.weight,
+                      // WEIGHT IS NOT AN EMPHASIS CHANNEL HERE. §9.5 states the
+                      // treatment as colour — "row receives soft blue
+                      // background, relevant cell receives signal emphasis" —
+                      // and weight is the one property that cannot interpolate:
+                      // 400 and 600 are different glyphs, so a cued row
+                      // un-bolds in a single frame when the focus decays. Seen
+                      // on the finished video at s05 and s07, ~1000 px changing
+                      // at once with identical colours before and after.
+                      fontWeight: t.body.weight,
                     }}
                   >
                     {c}
