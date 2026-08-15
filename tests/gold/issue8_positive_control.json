@@ -1,0 +1,75 @@
+[
+  {
+    "ref": "s04-ISSUE8-control",
+    "spans": [
+      {
+        "id": "sp_3dc90ed249",
+        "text": "Here's the mechanism."
+      },
+      {
+        "id": "sp_c6249782cc",
+        "text": "Both doctors start their transactions at the same instant, so Postgres hands each one a snapshot"
+      },
+      {
+        "id": "sp_ade42574d7",
+        "text": "a frozen view of the on-call table as it looked the moment the transaction began."
+      },
+      {
+        "id": "sp_acde26c2a5",
+        "text": "In that snapshot, two doctors show as on call."
+      },
+      {
+        "id": "sp_88c9f341ee",
+        "text": "Doctor A runs a check: 'is anyone else on call besides me?' The snapshot says yes, so A updates A's own row to off duty."
+      },
+      {
+        "id": "sp_b51bf5d0cd",
+        "text": "At the same moment, Doctor B runs the identical check against B's own snapshot, sees the same two doctors, and updates B's own row too."
+      },
+      {
+        "id": "sp_b735cd9656",
+        "text": "Neither transaction writes the row the other one reads."
+      },
+      {
+        "id": "sp_4f06ffeab0",
+        "text": "A only writes A's row; B only writes B's row."
+      },
+      {
+        "id": "sp_1c3727ba32",
+        "text": "Repeatable Read watches for two transactions writing the same row"
+      },
+      {
+        "id": "sp_8a2f1d1015",
+        "text": "that collision is what triggers a could-not-serialize error."
+      },
+      {
+        "id": "sp_c0aefbdd27",
+        "text": "Here there's no collision, so Postgres has nothing to catch."
+      },
+      {
+        "id": "sp_0a69c74ccc",
+        "text": "Both commit cleanly, and the table now shows zero doctors on call."
+      },
+      {
+        "id": "sp_4f71576f79",
+        "text": "The rule that broke"
+      },
+      {
+        "id": "sp_4ad90a3a7d",
+        "text": "at least one doctor must stay on call"
+      },
+      {
+        "id": "sp_a28aff68ec",
+        "text": "was never a fact about one row."
+      },
+      {
+        "id": "sp_6075dc41f2",
+        "text": "It's a fact about the relationship between rows, and each transaction only ever read that relationship, never locked it."
+      },
+      {
+        "id": "sp_52f3f3ceb8",
+        "text": "That gap, reading a condition and writing based on it while the condition itself goes unprotected, is write skew."
+      }
+    ]
+  }
+]

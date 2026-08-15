@@ -286,7 +286,7 @@ work**. Tracked as week 5 step 0.
 
 ---
 
-## ISSUE-8 — s04 states the pivotal claim of the video backwards · BLOCKING
+## ISSUE-8 — s04 states the pivotal claim of the video backwards · DETECTOR BUILT
 
 **Found by a human reading the script. Nothing in the pipeline can catch it, and
 that is the finding.**
@@ -761,6 +761,21 @@ content is an asset, used in a pipeline with no assets.** Three of eleven
 templates are in that position — `cold_open`, `concept_illustration`,
 `ui_walkthrough`.
 
+### CORRECTION, 15 Aug 2026 — this was mis-attributed
+
+The sparse scenes were first attributed to absent visual design and pointed at
+Phase 5. That was wrong, and it understated the gap.
+
+**§22 names an asset pipeline as a Milestone A deliverable:** *"Stock hook via
+Storyblocks trial; illustration/B-roll via Freepik AI (§14.3)."* It was never
+built. So `concept_illustration` at 0.43% ink is not a Phase-5 polish item — it
+is a **Milestone A deliverable that is missing**, and the scene is empty because
+the thing it exists to show was never fetched.
+
+ISSUE-17 (composition) and ISSUE-18 (typography/colour) ARE Phase 5 and stay
+there. This one is not, and filing it beside them made a stated Milestone A
+requirement look like deferred polish.
+
 **Not fixed, and the threshold was NOT tuned to make it pass.** 0.005 was set
 before this measurement, as a blank-catcher; moving it to 0.004 to quiet two
 scenes would be exactly the wrong response. Options are the same shape as
@@ -950,3 +965,46 @@ and `a11y.check_contrast` is already built and waiting for a palette to run
 against, so the work attaches without a rewrite.
 
 **The second of the two named gaps blocking Milestone A's success criterion.**
+
+
+---
+
+## ISSUE-8 — the detector exists, and the positive control passed
+
+`agents/fact_challenger.py`, §7.2 Tier 2, adversarial: the model is asked to
+**refute** each claim rather than verify it, because a model asked "is this
+correct?" agrees with fluent prose and that is exactly how ISSUE-8 survived.
+
+**Positive control (`tests/gold/issue8_positive_control.json`, the pre-fix
+narration recovered from git):**
+
+```
+sp_b735cd9656   refuted   confidence 0.90   BLOCKING
+```
+
+with the correct mechanism unprompted and a usable correction, plus the
+contradiction identified from both directions. Full transcript:
+`docs/week6-fact-challenger.md`.
+
+**It also found two errors in that narration nobody had noticed** — the
+Repeatable Read snapshot is taken at the first statement rather than at `BEGIN`,
+and "Postgres has nothing to catch" attributes to PostgreSQL a limitation that
+belongs to Repeatable Read.
+
+**And the CURRENT v2 is not clean:** 1 blocking, 3 refuted of 25 claims. s05
+describes Read Committed behaviour inside a video about Repeatable Read.
+
+### Why this is "detector built" and not "closed"
+
+The class of defect is now detectable and one instance is caught. It is not
+closed because:
+
+- **there is no negative control** — the false-positive rate is unmeasured, so a
+  confident `refuted` on a true claim would look identical to a real find;
+- **no sources are fetched** — §7.2 says "independently verified with sources",
+  and a `survives` here means only that an adversarial reading did not break it;
+- **the specimen instance in v2 is still unfixed** — a new blocking claim in s05
+  now stands in for the original.
+
+The original spans stay in the issue above as the specimen, and the fixture is
+guarded by a test so that "tidying" it cannot silently stop testing the checker.

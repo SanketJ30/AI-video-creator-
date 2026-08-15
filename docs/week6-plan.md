@@ -72,6 +72,12 @@ eleven templates depend on one — `cold_open`, `concept_illustration`,
 
 This is the single largest gap between what §22 asked for and what was built.
 
+**Correction on the record.** The sparse scenes were initially attributed
+entirely to absent visual design and filed against Phase 5. That was wrong: it
+made a stated Milestone A deliverable look like deferred polish. §22 names the
+asset pipeline explicitly, so ISSUE-15 belongs to Milestone A's scope, not
+Phase 5's. ISSUE-17 and ISSUE-18 are genuinely Phase 5 and stay there.
+
 ### 3.2 The success criterion has not been tested
 
 No instructional designer has reviewed anything. **Milestone A is therefore

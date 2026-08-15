@@ -1,0 +1,137 @@
+# The Fact Challenger — first run and positive control
+
+§7.2 Tier 2, built adversarially: the agent is prompted to **refute** each
+claim, not to verify it. ISSUE-8 is why.
+
+Findings attach to **spans**, not scenes. A verdict on a scene tells a reviewer
+to re-read ninety seconds; a verdict on `sp_b735cd9656` tells them which
+sentence.
+
+---
+
+## 1. The positive control — it caught the known false claim
+
+A checker that has never been shown a known-false claim has been *run*, not
+*tested*. The control is the pre-fix v2 s04 narration, recovered from git
+(`fd7f250`) and frozen at `tests/gold/issue8_positive_control.json` — 17 spans,
+containing the claim you identified.
+
+**Result: caught, at the top severity.**
+
+```
+BLOCKING (1)
+  [sp_b735cd9656]  refuted   confidence 0.90
+
+  claim:  Neither transaction writes a row that the other transaction reads.
+
+  attack: The check "is anyone else on call besides me?" scans the on-call set,
+          so A's query reads B's row and B's query reads A's row. A then writes
+          A's row (which B read) and B writes B's row (which A read). So each
+          transaction writes a row the other one read — that read-write
+          antidependency in both directions is precisely what makes this write
+          skew rather than a benign pair of updates. The true statement is
+          about writes, not reads: there is no write-write overlap.
+
+  should say: "Neither transaction writes the row the other one writes — but
+          each writes a row the other one read, and that read-write dependency
+          is invisible to Repeatable Read."
+
+  contradicts: sp_52f3f3ceb8
+```
+
+That is the diagnosis, the mechanism and the correction, unprompted.
+
+It also found the contradiction **from both directions**: challenging
+`sp_52f3f3ceb8` independently, it wrote *"this definition is undermined by
+sp_b735cd9656 … sp_b735cd9656 is the false one."*
+
+### Two further errors in the control that nobody had noticed
+
+| span | verdict | finding |
+|---|---|---|
+| `sp_ade42574d7` | refuted (0.65) | *"a frozen view … the moment the transaction began"* — in Repeatable Read the snapshot is taken at the **first statement**, not at `BEGIN` |
+| `sp_c0aefbdd27` | unsupported (0.60) | *"Postgres has nothing to catch"* overstates: the limitation is Repeatable Read's, not PostgreSQL's — SERIALIZABLE catches exactly this |
+
+**Control totals:** 11 claims extracted from 17 spans, 2 refuted, 1 blocking,
+$0.1496.
+
+The 6 spans that produced no claim were questions, framing and scenario
+stipulations — correctly skipped.
+
+---
+
+## 2. The current v2 — not clean
+
+25 claims across 9 scenes. **3 refuted, 1 blocking.**
+
+### BLOCKING — s05 `sp_e94ffb9700`, confidence 0.78
+
+> **claim:** With `SELECT ... FOR UPDATE` on the two on-call rows, Bo waits for
+> Alex, then sees Alex's committed result and therefore does not also go off
+> call.
+>
+> **attack:** Under REPEATABLE READ, a blocked `FOR UPDATE` waiting on a row
+> Alex then commits does **not** re-read the new version: PostgreSQL aborts the
+> waiter with ERROR 40001, *"could not serialize access due to concurrent
+> update"*. Re-reading the newly committed row after the lock is released is
+> READ COMMITTED behaviour. So *"Bo waits, sees her result"* is the wrong
+> mechanism for the stated isolation level, and the outcome for Bo is an error,
+> not a corrected read.
+
+A real error, and a subtle one: the narration describes Read Committed semantics
+inside a video whose entire subject is Repeatable Read.
+
+### The other two refutations
+
+- **s05 `sp_b94dd033f2`** (0.68) — *"a constraint checks one row at a time"* is
+  false as a general statement: `UNIQUE`, `EXCLUDE` and `FOREIGN KEY` are all
+  cross-row. Only `CHECK` is row-local. The conclusion holds for the wrong
+  reason, which would mislead a learner who then assumes `UNIQUE` cannot catch a
+  cross-row conflict.
+- **s07 `sp_4182784a44`** (0.60) — *"a table lock stalls every other
+  transaction"* is only true of `ACCESS EXCLUSIVE`; other lock modes leave
+  ordinary readers running.
+
+Four further spans came back `unsupported` — missing preconditions rather than
+falsehoods (s03, s05, s06, s07).
+
+---
+
+## 3. What this establishes, and what it does not
+
+**Establishes:** the checker detects the specimen it was built for, at high
+confidence, with a correct mechanism and a usable correction. It also found four
+errors nobody had gone looking for, in narration that had already passed every
+deterministic gate and two human readings.
+
+**Does not establish that it catches everything.** Two named limits:
+
+1. **No negative control yet.** Nothing here measures the false-positive rate. A
+   narration known to be fully correct, challenged and coming back clean, is the
+   missing half — and without it a confident-sounding `refuted` on a true claim
+   would look identical to a real find.
+2. **No sources.** §7.2 says *"independently verified with sources"*; this
+   version verifies against model knowledge. A `survives` means *an adversarial
+   reading did not break it*, not *a source confirms it*. Both limits print
+   under every report rather than living only in this document.
+
+**One authored number:** `AUTHORED_MIN_CONFIDENCE = 0.70`, marked. It gates the
+agent's confidence in its **own verdict**, not the truth of the claim. Below it
+a refutation is demoted to a warning and **never discarded**, because ISSUE-8's
+lesson is that silence is the expensive failure.
+
+**Cost:** $0.1496 (control) + $0.6019 (v2) = **$0.75**, one frontier-tier call
+per scene. §21's per-video agent budget absorbs this, and this is the one agent
+where the frontier tier is clearly worth paying for.
+
+---
+
+## 4. Consequence for the ID review
+
+**The video currently has a blocking factual error in s05.** `docs/week6-plan.md`
+listed *"is ISSUE-8 tolerable for a review?"* as an open decision; it is now
+answerable against a specific span rather than a worry.
+
+Fixing it is a Stage 2c regeneration, not a render change — and regeneration is
+stochastic, so the honest sequence is: regenerate, re-challenge, and only then
+put it in front of a reviewer.

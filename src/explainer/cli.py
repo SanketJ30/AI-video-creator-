@@ -41,6 +41,8 @@ script_app = typer.Typer(no_args_is_help=True,
                          help="Script generation into Gagné slots (§6 Stage 2c).")
 harness_app = typer.Typer(no_args_is_help=True,
                           help="The §14.4 regression harness — multi-sample.")
+facts_app = typer.Typer(no_args_is_help=True,
+                        help="The §7.2 Fact Challenger — adversarial.")
 storyboard_app = typer.Typer(no_args_is_help=True,
                              help="Storyboard: templates and cues (§6 Stage 2d, §10).")
 app.add_typer(db_app, name="db")
@@ -53,6 +55,7 @@ app.add_typer(curriculum_app, name="curriculum")
 app.add_typer(script_app, name="script")
 app.add_typer(harness_app, name="harness")
 app.add_typer(storyboard_app, name="storyboard")
+app.add_typer(facts_app, name="facts")
 
 err = typer.style
 
@@ -1156,6 +1159,94 @@ def _render_lint(report) -> str:
 
 def _kv(d: dict) -> str:
     return ", ".join(f"{k}={v}" for k, v in d.items() if k != "authored") or "-"
+
+
+# ---------------------------------------------------------------------- facts
+
+def _render_challenges(report) -> str:
+    from explainer.agents import fact_challenger as fc
+    lines: list[str] = []
+    colours = {"blocking": typer.colors.RED, "warning": typer.colors.YELLOW,
+               "info": typer.colors.BRIGHT_BLACK}
+    for sev in ("blocking", "warning", "info"):
+        group = [c for c in report.all if c.severity == sev]
+        if not group:
+            continue
+        lines.append(err(f"{sev.upper()} ({len(group)})", fg=colours[sev],
+                         bold=True))
+        for c in sorted(group, key=lambda x: (x.scene_ref, x.span_id)):
+            lines.append(err(f"  [{c.scene_ref} {c.span_id}] {c.verdict}  "
+                             f"confidence {c.confidence:.2f}", fg=colours[sev]))
+            lines.append(f"      claim:  {c.claim}")
+            lines.append(f"      attack: {c.attack}")
+            if c.correction:
+                lines.append(err(f"      should say: {c.correction}",
+                                 fg=typer.colors.GREEN))
+            if c.contradicts:
+                lines.append(f"      contradicts: {c.contradicts}")
+    if not report.all:
+        lines.append("no claims extracted")
+    lines.append("")
+    lines.append(err(f"threshold: a refutation is BLOCKING at confidence >= "
+                     f"{fc.AUTHORED_MIN_CONFIDENCE} (AUTHORED AND UNREVIEWED). "
+                     f"Below it the refutation is still shown, demoted to a "
+                     f"warning — never discarded.", fg=typer.colors.BRIGHT_BLACK))
+    lines.append(err("verifies against model knowledge, NOT sources — a "
+                     "'survives' means an adversarial reading did not break it.",
+                     fg=typer.colors.BRIGHT_BLACK))
+    return chr(10).join(lines)
+
+
+@facts_app.command("challenge")
+def facts_challenge(slug: str, video_ref: str,
+                    save: bool = typer.Option(False, "--save"),
+                    scene: str | None = typer.Option(None, "--scene")) -> None:
+    """§7.2: refute every factual claim in one video's narration."""
+    from .agents import fact_challenger as fc
+    from .agents import script_writer as sw
+    with db.tx() as conn:
+        course_id, video = _script_context(conn, slug, video_ref)
+        rows = sw.load(conn, str(video["id"]))
+        if not rows:
+            typer.echo(f"no script for '{video_ref}'", err=True)
+            raise typer.Exit(1)
+        b = brief_mod.load(conn, course_id)
+        scenes = [{"ref": r["ref"],
+                   "spans": [{"id": sp["id"], "text": sp["text"]}
+                             for sp in (r["narration"] or [])]}
+                  for r in rows if scene is None or r["ref"] == scene]
+        context = {"topic": b.title, "description": b.description,
+                   "audience": b.audience.to_json(),
+                   "video_title": video["title"]}
+        report = fc.challenge(conn, course_id, scenes, context)
+        if save:
+            fc.save(conn, str(video["id"]), report,
+                    _scene_id_map(conn, str(video["id"])))
+
+    typer.echo(_render_challenges(report))
+    typer.echo("")
+    typer.echo(f"{len(report.all)} claim(s), {len(report.refuted)} refuted, "
+               f"{len(report.blocking)} blocking, "
+               f"{len(report.attempts)} model call(s), ${report.cost_usd:.4f}")
+    raise typer.Exit(0 if report.ok else 1)
+
+
+@facts_app.command("challenge-file")
+def facts_challenge_file(path: str,
+                         topic: str = typer.Option(..., "--topic")) -> None:
+    """Challenge narration from a JSON file — the positive-control path.
+
+    A checker that has never been shown a known-false claim has been run, not
+    tested. The file is `[{"ref": ..., "spans": [{"id":..., "text":...}]}]`.
+    """
+    from .agents import fact_challenger as fc
+    scenes = jsonlib.loads(Path(path).read_text(encoding="utf-8"))
+    with db.tx() as conn:
+        report = fc.challenge(conn, None, scenes, {"topic": topic})
+    typer.echo(_render_challenges(report))
+    typer.echo("")
+    typer.echo(f"{len(report.all)} claim(s), {len(report.refuted)} refuted, "
+               f"{len(report.blocking)} blocking, ${report.cost_usd:.4f}")
 
 
 # ---------------------------------------------------------------------- render
